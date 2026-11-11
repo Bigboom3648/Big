@@ -1,0 +1,19 @@
+{
+  "name": "kubozemye",
+  "version": "1.0.0",
+  "description": "Кубоземье — оригинальная воксельная песочница с мультиплеером",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.mjs",
+    "build:static": "node scripts/build-static.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  }
+}
