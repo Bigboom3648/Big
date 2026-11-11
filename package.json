@@ -7,13 +7,17 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test/smoke.mjs",
-    "build:static": "node scripts/build-static.mjs"
+    "build:static": "node scripts/build-static.mjs",
+    "vendor": "node scripts/vendor.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "three": "^0.170.0",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "three": "^0.170.0",
+    "peerjs": "^1.5.5"
   }
 }

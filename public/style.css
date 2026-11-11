@@ -892,3 +892,119 @@ body.touch .inv .hint {
     opacity: 0;
   }
 }
+
+/* ---------- игра с друзьями ---------- */
+.friends {
+  margin-top: 6px;
+}
+.friends .or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.friends .or::before,
+.friends .or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.joinrow,
+.linkrow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.joinrow .btn,
+.linkrow .btn {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+#code,
+#ivLink {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  outline: none;
+  font-size: 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#code {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+#code:focus,
+#ivLink:focus {
+  border-color: var(--accent);
+}
+.joinrow {
+  margin-top: 8px;
+}
+.invited {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(56, 217, 224, 0.14);
+  border: 1px solid rgba(56, 217, 224, 0.45);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.invited b {
+  letter-spacing: 0.1em;
+  color: var(--accent2);
+}
+.invitep h1 {
+  margin-bottom: 6px;
+}
+.codebox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 10px 0 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px dashed rgba(255, 181, 71, 0.55);
+}
+.codebox span {
+  font-size: 12px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.codebox b {
+  font: 800 34px/1.1 ui-monospace, Consolas, monospace;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  user-select: text;
+  -webkit-user-select: text;
+}
+#ivLink {
+  font-size: 13px;
+}
+.steps {
+  margin: 12px 0 4px;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.steps li + li {
+  margin-top: 4px;
+}
+#ivPlayers b {
+  color: var(--text);
+}
+#ivStatus.bad {
+  color: #ff8f8f;
+}

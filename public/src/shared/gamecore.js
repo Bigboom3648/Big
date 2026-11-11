@@ -342,6 +342,11 @@ export class GameCore {
     c.name = name;
     c.color = COLORS[(c.id - 1) % COLORS.length];
     c.token = String(m.token || '').slice(0, 64);
+    // тот же игрок во второй вкладке — отдельная запись, чтобы вкладки не затирали друг друга
+    if (c.token) {
+      const base = c.token;
+      for (let k = 2; [...this.clients.values()].some((o) => o.token === c.token); k++) c.token = base + '~' + k;
+    }
     const sv = c.token ? this.saved[c.token] : null;
     c.mode = m.mode === 'c' || m.mode === 's' ? m.mode : sv && sv.mode === 'c' ? 'c' : 's';
     if (sv && Array.isArray(sv.pos) && sv.pos.length === 3 && sv.pos.every(fin)) c.pos = sv.pos.slice();

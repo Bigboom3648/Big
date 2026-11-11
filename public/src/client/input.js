@@ -128,7 +128,11 @@ export class Input {
     addEventListener('keydown', (e) => {
       const g = this.game;
       const st = g.state;
-      if (st === 'start' || st === 'dead') return;
+      if (st === 'start' || st === 'dead' || st === 'lost' || st === 'loading') return;
+      if (st === 'invite') {
+        if (e.code === 'Escape') g.ui.closeInvite();
+        return;
+      }
       if (st === 'chat') {
         if (e.code === 'Escape') g.ui.closeChat();
         return;

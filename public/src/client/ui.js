@@ -1,6 +1,7 @@
 // Интерфейс: панель быстрого доступа, рюкзак, крафт, чат, меню, подсказки.
 import { RECIPES, CREATIVE_ITEMS, ITEMS, ARMOR_SLOTS, itemName, maxStack } from '../shared/blocks.js';
 import { HOTBAR, SLOTS, TOTAL } from './inventory.js';
+import { normalizeCode, p2pSupported, CODE_HINT } from './p2p.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,8 @@ export class UI {
       'sDist', 'sFov', 'sSens', 'sVol', 'vDist', 'vFov', 'vSens', 'vVol', 'cJump', 'death', 'dRespawn', 'lost', 'lReload',
       'loading', 'loadtext', 'start', 'name', 'play', 'starterr',
       'armor', 'armorinfo', 'armorhud', 'cShaders', 'cHorror', 'dread', 'scare',
+      'invited', 'invitedCode', 'friends', 'host', 'code', 'join', 'friendsOff', 'mInvite', 'lostText',
+      'invite', 'ivStatus', 'ivBox', 'ivCode', 'ivLink', 'ivCopy', 'ivShare', 'ivSteps', 'ivPlayers', 'ivRetry', 'ivClose',
     ]) {
       this.el[id] = $(id);
     }
@@ -28,6 +31,7 @@ export class UI {
     this.bindInventory();
     this.bindMenu();
     this.bindChat();
+    this.bindInvite();
     this.buildHotbar();
   }
 
@@ -43,29 +47,71 @@ export class UI {
   // ---------- старт ----------
   bindStart() {
     const e = this.el;
-    if (globalThis.KUBOZEMYE_OFFLINE === true) {
-      document.querySelector('.tag').textContent =
-        'Воксельная песочница: копай, строй, летай на крюке. Здесь одиночная игра, мультиплеер работает в версии с сервером.';
-    }
     try {
       e.name.value = localStorage.getItem('kubozemye.name') || '';
     } catch {}
+    // игра с друзьями: недоступна там, где браузер не умеет прямые соединения
+    if (!p2pSupported()) {
+      e.friends.classList.add('hidden');
+      document.querySelector('.tag').textContent = 'Воксельная песочница: копай, строй, летай на крюке.';
+      const off = e.friendsOff;
+      off.classList.remove('hidden');
+      const site = globalThis.KUBOZEMYE_SITE;
+      if (site) {
+        off.append('Играть вместе с друзьями можно на сайте игры: ');
+        const a = document.createElement('a');
+        a.href = site;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = site.replace(/^https?:\/\//, '');
+        off.append(a);
+      } else off.textContent = 'Этот браузер не умеет играть с друзьями. Откройте игру в Chrome, Edge, Firefox или Safari.';
+    }
+    // пришли по ссылке-приглашению
+    const invited = p2pSupported() ? normalizeCode(new URLSearchParams(location.search).get('join')) : null;
+    if (invited) {
+      e.invited.classList.remove('hidden');
+      e.invitedCode.textContent = invited;
+      e.code.value = invited;
+      e.join.textContent = 'Войти в мир друга';
+      e.join.classList.add('primary');
+      e.play.classList.remove('primary', 'big');
+      e.play.textContent = 'Играть в своём мире';
+    }
     for (const b of document.querySelectorAll('.mode')) {
       b.addEventListener('click', () => {
         this.startMode = b.dataset.mode;
         for (const o of document.querySelectorAll('.mode')) o.classList.toggle('on', o === b);
       });
     }
-    const go = () => {
+    const start = (how) => {
       const name = e.name.value.trim();
       try {
         localStorage.setItem('kubozemye.name', name);
       } catch {}
-      this.game.join(name, this.startMode);
+      e.starterr.textContent = '';
+      this.game.join(name, this.startMode, how);
     };
-    e.play.addEventListener('click', go);
+    const joinFriend = () => {
+      const code = normalizeCode(e.code.value);
+      if (!code) {
+        e.starterr.textContent = CODE_HINT;
+        e.code.focus();
+        return;
+      }
+      start({ join: code });
+    };
+    e.play.addEventListener('click', () => start('auto'));
+    e.host.addEventListener('click', () => start('host'));
+    e.join.addEventListener('click', joinFriend);
+    e.code.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') joinFriend();
+    });
     e.name.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') go();
+      if (ev.key === 'Enter') {
+        if (invited) joinFriend();
+        else start('auto');
+      }
     });
     e.dRespawn.addEventListener('click', () => {
       e.death.classList.add('hidden');
@@ -476,6 +522,7 @@ export class UI {
     const e = this.el;
     const g = this.game;
     e.mResume.addEventListener('click', () => this.closeMenu());
+    e.mInvite.addEventListener('click', () => this.openInvite());
     e.mMode.addEventListener('click', () => {
       g.net.send({ t: 'chat', m: '/mode ' + (g.player.mode === 's' ? 'c' : 's') });
     });
@@ -515,9 +562,14 @@ export class UI {
     if (g.state !== 'play') return;
     g.setState('menu');
     g.input.unlock();
-    this.el.netinfo.textContent = g.net.online
-      ? `Мультиплеер: игроков онлайн — ${g.names.size}. Друзья заходят по адресу этого сервера: ${location.host}`
-      : 'Одиночная игра: сервер не найден, мир сохраняется в этом браузере. Для игры с друзьями запустите сервер (npm start).';
+    const net = g.net;
+    const n = g.names.size;
+    let info;
+    if (net.mode === 'server') info = `Сервер игры: игроков онлайн — ${n}. Друзья заходят по адресу ${location.host}.`;
+    else if (net.mode === 'guest') info = `Вы в гостях в мире друга (код ${net.code}). Игроков в мире: ${n}.`;
+    else if (net.host && net.host.peer) info = `Ваш мир открыт для друзей, код ${net.code}. Игроков в мире: ${n}.`;
+    else info = 'Мир хранится в этом браузере. Чтобы играть вместе — нажмите «Позвать друзей».';
+    this.el.netinfo.textContent = info;
     this.el.menu.classList.remove('hidden');
   }
 
@@ -540,7 +592,140 @@ export class UI {
   }
 
   showLost() {
-    this.game.input.unlock();
+    const g = this.game;
+    for (const id of ['menu', 'invite', 'inventory']) this.el[id].classList.add('hidden');
+    g.setState('lost');
+    g.input.unlock();
+    this.el.lostText.textContent =
+      g.net.mode === 'guest'
+        ? 'Хозяин мира закрыл игру или пропал интернет. Когда друг снова откроет мир (код останется тем же), нажмите «Переподключиться».'
+        : 'Сервер недоступен. Мир сохранён на сервере.';
     this.el.lost.classList.remove('hidden');
+  }
+
+  // ---------- игра с друзьями ----------
+  bindInvite() {
+    const e = this.el;
+    e.ivClose.addEventListener('click', () => this.closeInvite());
+    e.ivRetry.addEventListener('click', () => this.startInvite());
+    e.ivLink.addEventListener('focus', () => e.ivLink.select());
+    e.ivCopy.addEventListener('click', () => {
+      const fallback = () => {
+        e.ivLink.focus();
+        e.ivLink.select();
+        this.toast('Ссылка выделена — скопируйте её (Ctrl+C)', 3000);
+      };
+      try {
+        navigator.clipboard.writeText(e.ivLink.value).then(() => this.toast('Ссылка скопирована — отправьте её друзьям', 3000), fallback);
+      } catch {
+        fallback();
+      }
+    });
+    if (navigator.share) {
+      e.ivShare.classList.remove('hidden');
+      e.ivShare.addEventListener('click', () => {
+        const code = e.ivCode.textContent;
+        navigator
+          .share({ title: 'Кубоземье', text: code ? `Заходи ко мне в Кубоземье! Код мира: ${code}` : 'Заходи ко мне в Кубоземье!', url: e.ivLink.value })
+          .catch(() => {});
+      });
+    }
+  }
+
+  inviteLink(code) {
+    const u = new URL(location.href);
+    const ps = u.searchParams.get('peerserver'); // только для проверки на своём компьютере
+    u.search = '';
+    u.hash = '';
+    if (ps) u.searchParams.set('peerserver', ps);
+    if (code) u.searchParams.set('join', code);
+    return u.href;
+  }
+
+  showInvite(status, code, link, steps) {
+    const e = this.el;
+    e.ivStatus.textContent = status;
+    e.ivStatus.classList.remove('bad');
+    e.ivRetry.classList.add('hidden');
+    e.ivCode.parentElement.classList.toggle('hidden', !code);
+    e.ivCode.textContent = code || '';
+    e.ivLink.value = link;
+    e.ivSteps.replaceChildren(
+      ...steps.map((t) => {
+        const li = document.createElement('li');
+        li.textContent = t;
+        return li;
+      }),
+    );
+    e.ivBox.classList.remove('hidden');
+    this.renderInvitePlayers();
+  }
+
+  renderInvitePlayers() {
+    const g = this.game;
+    const names = [...g.names.values()].map((p) => p.name);
+    this.el.ivPlayers.textContent = names.length > 1 ? 'Сейчас в мире: ' + names.join(', ') : 'Пока в мире только вы.';
+  }
+
+  async startInvite() {
+    const g = this.game;
+    const e = this.el;
+    const net = g.net;
+    if (net.mode === 'server') {
+      this.showInvite('Вы играете на сервере игры — друзья заходят по его адресу.', null, this.inviteLink(null), [
+        'Отправьте этот адрес друзьям.',
+        'Они открывают его в браузере и нажимают «Играть».',
+      ]);
+      return;
+    }
+    if (net.mode === 'guest') {
+      this.showInvite('Вы в гостях в мире друга. Позовите ещё друзей — по этой же ссылке.', net.code, this.inviteLink(net.code), [
+        'Отправьте ссылку другим друзьям — они попадут в этот же мир.',
+        'Мир работает, пока он открыт у хозяина.',
+      ]);
+      return;
+    }
+    e.ivBox.classList.add('hidden');
+    e.ivRetry.classList.add('hidden');
+    e.ivStatus.classList.remove('bad');
+    if (!(await net.canHost())) {
+      const site = globalThis.KUBOZEMYE_SITE;
+      e.ivStatus.textContent = site
+        ? `В этой версии игры позвать друзей нельзя. Откройте сайт игры — ${site} — и нажмите там «Создать игру для друзей».`
+        : 'Этот браузер не умеет играть с друзьями. Откройте игру в Chrome, Edge, Firefox или Safari.';
+      return;
+    }
+    e.ivStatus.textContent = 'Открываю мир для друзей…';
+    try {
+      const code = await net.startHosting();
+      if (g.state !== 'invite') return;
+      this.showInvite('Мир открыт! Друзья могут заходить.', code, this.inviteLink(code), [
+        'Отправьте ссылку друзьям в любой мессенджер — или просто скажите код.',
+        'Друг открывает ссылку и нажимает «Войти в мир друга» — и он у вас в мире.',
+        'Мир работает, пока у вас открыта эта вкладка. В следующий раз код будет тем же.',
+      ]);
+    } catch (err) {
+      e.ivStatus.textContent = (err && err.message) || 'Не получилось открыть мир для друзей.';
+      e.ivStatus.classList.add('bad');
+      e.ivRetry.classList.remove('hidden');
+    }
+  }
+
+  openInvite() {
+    const g = this.game;
+    if (g.state === 'menu') this.el.menu.classList.add('hidden');
+    else if (g.state !== 'play') return;
+    g.setState('invite');
+    g.input.unlock();
+    this.el.invite.classList.remove('hidden');
+    this.startInvite();
+  }
+
+  closeInvite() {
+    const g = this.game;
+    if (g.state !== 'invite') return;
+    this.el.invite.classList.add('hidden');
+    g.setState('play');
+    g.input.lock();
   }
 }

@@ -104,11 +104,12 @@ class Game {
     if (name) this.ui.toast(name, 1200);
   }
 
-  async join(name, mode) {
+  // how: 'auto' | 'host' (мир для друзей) | { join: код } (в мир друга)
+  async join(name, mode, how = 'auto') {
     if (this.joining) return;
     this.joining = true;
     this.sound.init();
-    this.ui.setLoading('Подключение…');
+    this.ui.setLoading(how && how.join ? 'Подключаюсь к миру друга…' : 'Подключение…');
     let token = '';
     try {
       token = localStorage.getItem('kubozemye.token') || '';
@@ -120,12 +121,22 @@ class Game {
     let w;
     try {
       await this.world.engine.ready;
-      w = await this.net.connect({ name, token, mode });
+      w = await this.net.connect({ name, token, mode }, how);
     } catch (e) {
       this.joining = false;
-      this.ui.startError('Не удалось подключиться: ' + (e && e.message ? e.message : 'ошибка'));
+      this.ui.startError(e && e.friendly ? e.message : 'Не удалось подключиться: ' + (e && e.message ? e.message : 'ошибка'));
       return;
     }
+    if (how && how.join) {
+      // ссылка в адресной строке — чтобы «Переподключиться» вернуло в этот же мир
+      try {
+        const u = new URL(location.href);
+        u.searchParams.set('join', how.join);
+        history.replaceState(null, '', u.href);
+      } catch {}
+    }
+    this.afterReady = how === 'host' ? 'invite' : null;
+    this.net.onStatus = (text) => this.ui.toast(text, 4000);
     this.selfId = w.id;
     this.time = w.time;
     this.dayLength = w.dayLength || DAY_LENGTH;
@@ -165,10 +176,12 @@ class Game {
     n.on('join', (m) => {
       ent().addPlayer(m);
       this.names.set(m.id, { name: m.name, color: m.color });
+      this.ui.renderInvitePlayers();
     });
     n.on('leave', (m) => {
       ent().removePlayer(m.id);
       this.names.delete(m.id);
+      this.ui.renderInvitePlayers();
     });
     n.on('pp', (m) => ent().onPlayers(m.l, this.selfId));
     n.on('cd', (m) => this.world.onChunkEdits(m.c));
@@ -274,7 +287,8 @@ class Game {
       this.ready = true;
       this.ui.setLoading(null);
       this.setState('play');
-      this.input.lock();
+      if (this.afterReady === 'invite') this.ui.openInvite();
+      else this.input.lock();
       if (this.fresh) {
         const touch = this.input.touch;
         this.ui.addChat(null, null, p.mode === 'c'

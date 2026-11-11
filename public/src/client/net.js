@@ -1,13 +1,25 @@
-// Сеть: WebSocket к серверу, а если сервера нет — локальное ядро в браузере.
-const SAVE_KEY = 'kubozemye.world.v1';
+// Сеть. Три способа играть:
+//  - 'server' — страница открыта с сервера игры (npm start), все играют на нём;
+//  - 'local'  — мир крутится в этом браузере; его можно открыть друзьям по коду;
+//  - 'guest'  — мы в мире друга, подключились к его браузеру по коду.
+import { LocalCore } from './localcore.js';
 
 export class Net {
   constructor() {
     this.handlers = {};
-    this.online = false;
+    this.mode = 'none';
     this.ws = null;
     this.local = null;
+    this.link = null; // канал к миру друга
+    this.host = null; // открытый для друзей мир
+    this.code = null; // код мира (свой или друга)
     this.onClose = null;
+    this.onStatus = null;
+  }
+
+  // true — в мире могут быть другие игроки
+  get online() {
+    return this.mode === 'server' || this.mode === 'guest' || !!(this.host && this.host.peer);
   }
 
   on(type, fn) {
@@ -22,16 +34,21 @@ export class Net {
   send(m) {
     if (this.ws) {
       if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m));
-    } else if (this.local) this.local.send(m);
+    } else if (this.link) this.link.send(m);
+    else if (this.local) this.local.send(0, m);
   }
 
-  // Подключение. Возвращает сообщение welcome.
-  async connect(hello) {
+  // Подключение. how: 'auto' — сервер, а если его нет — мир в браузере;
+  // 'host' — сразу мир в браузере (потом откроем его друзьям); { join: код } — к другу.
+  // Возвращает сообщение welcome.
+  async connect(hello, how = 'auto') {
+    if (how && how.join) return this.connectGuest(how.join, hello);
     const q = new URLSearchParams(location.search);
     const forced = q.get('server');
-    // window.KUBOZEMYE_OFFLINE = true на странице — сразу одиночный режим (для статического хостинга)
-    const offline = q.has('offline') || globalThis.KUBOZEMYE_OFFLINE === true;
-    const canWs = !offline && (forced || location.protocol === 'http:' || location.protocol === 'https:');
+    // window.KUBOZEMYE_OFFLINE = true на странице — без своего сервера (статический хостинг)
+    const offline =
+      q.has('offline') || globalThis.KUBOZEMYE_OFFLINE === true || location.hostname.endsWith('.github.io');
+    const canWs = how === 'auto' && !offline && (forced || location.protocol === 'http:' || location.protocol === 'https:');
     if (canWs) {
       const url = forced || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
       try {
@@ -76,13 +93,14 @@ export class Net {
             done = true;
             clearTimeout(timer);
             this.ws = ws;
-            this.online = true;
+            this.mode = 'server';
             resolve(m);
           } else if (m.t === 'kick') {
             done = true;
             clearTimeout(timer);
             const err = new Error(m.m);
             err.kick = true;
+            err.friendly = true;
             reject(err);
           }
           return;
@@ -107,71 +125,85 @@ export class Net {
   }
 
   async connectLocal(hello) {
-    let save = null;
-    try {
-      save = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-    } catch {}
-    const store = (data) => {
-      try {
-        localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-      } catch {}
-    };
-    let resolveWelcome;
-    const welcome = new Promise((r) => (resolveWelcome = r));
-    const onMsg = (m) => {
-      if (m.t === 'welcome') resolveWelcome(m);
-      else this.dispatch(m);
-    };
+    this.local = new LocalCore();
+    await this.local.start();
+    this.mode = 'local';
+    return new Promise((resolve) => {
+      let welcomed = false;
+      this.local.open(0, (m) => {
+        if (!welcomed && m.t === 'welcome') {
+          welcomed = true;
+          resolve(m);
+        } else this.dispatch(m);
+      });
+      this.local.send(0, { t: 'hello', ...hello });
+    });
+  }
 
-    const viaWorker = () =>
-      new Promise((resolve, reject) => {
-        let w;
-        try {
-          w = new Worker(new URL('./localworker.js', import.meta.url), { type: 'module' });
-        } catch (e) {
-          reject(e);
+  async connectGuest(code, hello) {
+    const { joinPeer } = await import('./p2p.js');
+    const link = await joinPeer(code);
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (err, m) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (err) {
+          link.close();
+          reject(err);
+        } else {
+          this.link = link;
+          this.mode = 'guest';
+          this.code = code;
+          resolve(m);
+        }
+      };
+      const timer = setTimeout(() => {
+        const e = new Error('Мир друга не ответил. Попробуйте ещё раз.');
+        e.friendly = true;
+        finish(e);
+      }, 15000);
+      link.onMessage((m) => {
+        if (done) {
+          this.dispatch(m);
           return;
         }
-        const timer = setTimeout(() => reject(new Error('worker timeout')), 5000);
-        w.onerror = () => {
-          clearTimeout(timer);
-          reject(new Error('worker error'));
-        };
-        w.onmessage = (e) => {
-          const d = e.data;
-          if (d.k === 'ready') {
-            clearTimeout(timer);
-            resolve({ send: (m) => w.postMessage({ k: 'msg', m }), flush: () => w.postMessage({ k: 'flush' }) });
-          } else if (d.k === 'msg') onMsg(d.m);
-          else if (d.k === 'save') store(d.data);
-        };
-        w.postMessage({ k: 'init', save });
+        if (m.t === 'welcome') finish(null, m);
+        else if (m.t === 'kick') {
+          const e = new Error(m.m);
+          e.friendly = true;
+          finish(e);
+        }
       });
-
-    const inline = async () => {
-      const { GameCore } = await import('../shared/gamecore.js');
-      const core = new GameCore({ storage: { load: () => save, save: store } });
-      const client = core.connect((m) => queueMicrotask(() => onMsg(m)));
-      let last = Date.now();
-      setInterval(() => {
-        const now = Date.now();
-        core.tick(Math.min(0.5, (now - last) / 1000));
-        last = now;
-      }, 100);
-      return { send: (m) => core.handle(client, m), flush: () => core.save() };
-    };
-
-    try {
-      this.local = await viaWorker();
-    } catch {
-      this.local = await inline();
-    }
-    this.online = false;
-    addEventListener('pagehide', () => this.local.flush());
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') this.local.flush();
+      link.onClose(() => {
+        if (!done) {
+          const e = new Error('Связь с другом прервалась. Попробуйте ещё раз.');
+          e.friendly = true;
+          finish(e);
+        } else if (this.link === link && this.onClose) this.onClose();
+      });
+      link.send({ t: 'hello', ...hello });
     });
-    this.local.send({ t: 'hello', ...hello });
-    return welcome;
+  }
+
+  // Можно ли открыть этот мир друзьям (мир в браузере и браузер умеет WebRTC).
+  async canHost() {
+    if (this.mode !== 'local') return false;
+    const { p2pSupported } = await import('./p2p.js');
+    return p2pSupported();
+  }
+
+  // Открывает мир в браузере для друзей. Возвращает код мира.
+  async startHosting() {
+    if (this.mode !== 'local') throw new Error('not local');
+    if (!this.host) {
+      const { Host } = await import('./p2p.js');
+      this.host = new Host(this.local, (text) => this.onStatus && this.onStatus(text));
+      // закрываем вкладку — друзья сразу узнают, что мир закрыт
+      addEventListener('pagehide', () => this.host.stop());
+    }
+    this.code = await this.host.start();
+    return this.code;
   }
 }

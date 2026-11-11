@@ -71,6 +71,7 @@
         <h1>Пауза</h1>
         <p id="netinfo" class="hint"></p>
         <button id="mResume" class="btn primary">Продолжить</button>
+        <button id="mInvite" class="btn">Позвать друзей</button>
         <button id="mMode" class="btn"></button>
         <label>Дальность прорисовки: <b id="vDist"></b><input id="sDist" type="range" min="3" max="12" step="1" /></label>
         <label>Поле зрения: <b id="vFov"></b><input id="sFov" type="range" min="60" max="100" step="1" /></label>
@@ -100,10 +101,29 @@
       </div>
     </div>
 
+    <div id="invite" class="overlay hidden">
+      <div class="panel menu invitep">
+        <h1>Игра с друзьями</h1>
+        <p id="ivStatus" class="hint">Открываю мир для друзей…</p>
+        <div id="ivBox" class="hidden">
+          <div class="codebox"><span>Код мира</span><b id="ivCode"></b></div>
+          <div class="linkrow">
+            <input id="ivLink" readonly aria-label="Ссылка-приглашение" />
+            <button id="ivCopy" class="btn">Скопировать</button>
+          </div>
+          <button id="ivShare" class="btn hidden">Отправить ссылку…</button>
+          <ol id="ivSteps" class="steps"></ol>
+          <p id="ivPlayers" class="hint"></p>
+        </div>
+        <button id="ivRetry" class="btn hidden">Попробовать ещё раз</button>
+        <button id="ivClose" class="btn primary">Играть</button>
+      </div>
+    </div>
+
     <div id="lost" class="overlay hidden">
       <div class="panel menu">
         <h1>Связь потеряна</h1>
-        <p class="hint">Сервер недоступен. Мир сохранён на сервере.</p>
+        <p id="lostText" class="hint">Сервер недоступен. Мир сохранён на сервере.</p>
         <button id="lReload" class="btn primary">Переподключиться</button>
       </div>
     </div>
@@ -114,12 +134,22 @@
       <div class="panel startp">
         <div class="logo"><span>К</span><span>У</span><span>Б</span><span>О</span><span>З</span><span>Е</span><span>М</span><span>Ь</span><span>Е</span></div>
         <p class="tag">Воксельная песочница: копай, строй, летай на крюке — вместе с друзьями</p>
+        <div id="invited" class="invited hidden">Друг зовёт вас в свой мир <b id="invitedCode"></b>. Впишите имя и нажмите «Войти в мир друга».</div>
         <input id="name" maxlength="16" placeholder="Ваше имя" autocomplete="off" />
         <div class="modes">
           <button class="mode on" data-mode="s"><b>Выживание</b><span>добыча, крафт, ночные мрачники</span></button>
           <button class="mode" data-mode="c"><b>Творчество</b><span>все блоки, полёт, без урона</span></button>
         </div>
         <button id="play" class="btn primary big">Играть</button>
+        <div id="friends" class="friends">
+          <div class="or"><span>вместе с друзьями</span></div>
+          <button id="host" class="btn">Создать игру для друзей</button>
+          <div class="joinrow">
+            <input id="code" maxlength="80" placeholder="Код от друга" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+            <button id="join" class="btn">Войти</button>
+          </div>
+        </div>
+        <p id="friendsOff" class="hint hidden"></p>
         <p id="starterr" class="err"></p>
       </div>
     </div>

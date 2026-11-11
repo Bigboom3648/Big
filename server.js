@@ -11,7 +11,6 @@ import { TICK_RATE } from './public/src/shared/constants.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const THREE_DIR = path.join(ROOT, 'node_modules', 'three', 'build');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const SAVE_FILE = path.join(DATA_DIR, 'world.json');
 const PORT = Number(process.env.PORT) || 3000;
@@ -89,8 +88,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (pathname === '/') pathname = '/index.html';
-  if (pathname.startsWith('/vendor/three/')) serveFile(res, THREE_DIR, pathname.slice('/vendor/three/'.length));
-  else serveFile(res, PUBLIC, pathname.slice(1));
+  serveFile(res, PUBLIC, pathname.slice(1));
 });
 
 // ---------- сеть ----------

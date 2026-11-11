@@ -1,9 +1,10 @@
-// Одиночная игра: то же серверное ядро, но внутри воркера браузера.
+// Мир в браузере: то же серверное ядро, но внутри воркера. Поддерживает
+// нескольких игроков — своего (cid 0) и друзей, подключённых по коду.
 import { GameCore } from '../shared/gamecore.js';
 import { TICK_RATE } from '../shared/constants.js';
 
 let core = null;
-let client = null;
+const clients = new Map();
 
 self.onmessage = (e) => {
   const d = e.data;
@@ -14,7 +15,6 @@ self.onmessage = (e) => {
         save: (data) => self.postMessage({ k: 'save', data }),
       },
     });
-    client = core.connect((m) => self.postMessage({ k: 'msg', m }));
     let last = Date.now();
     setInterval(() => {
       const now = Date.now();
@@ -23,9 +23,22 @@ self.onmessage = (e) => {
       core.tick(dt);
     }, 1000 / TICK_RATE);
     self.postMessage({ k: 'ready' });
-  } else if (d.k === 'msg' && core) {
-    core.handle(client, d.m);
-  } else if (d.k === 'flush' && core) {
+    return;
+  }
+  if (!core) return;
+  if (d.k === 'open') {
+    const cid = d.cid;
+    clients.set(cid, core.connect((m) => self.postMessage({ k: 'msg', cid, m })));
+  } else if (d.k === 'msg') {
+    const c = clients.get(d.cid);
+    if (c) core.handle(c, d.m);
+  } else if (d.k === 'close') {
+    const c = clients.get(d.cid);
+    if (c) {
+      core.disconnect(c);
+      clients.delete(d.cid);
+    }
+  } else if (d.k === 'flush') {
     core.save();
   }
 };
