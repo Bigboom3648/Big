@@ -23,6 +23,9 @@ export class Input {
     this.lastW = 0;
     this.lastSpace = 0;
     this.sprintLatch = false;
+    this.everLocked = false;
+    this.lockFails = 0;
+    this.lastFail = 0;
     this.joy = { id: null, x: 0, y: 0 };
     this.lookP = { id: null, x: 0, y: 0, t: 0, moved: 0, long: false, timer: 0 };
     this.btn = { jump: false, down: false, attack: false };
@@ -38,9 +41,27 @@ export class Input {
   lock() {
     if (this.touch || this.noLock) return;
     try {
+      if (!this.canvas.requestPointerLock) {
+        this.lockFailed();
+        return;
+      }
       const p = this.canvas.requestPointerLock();
-      if (p && p.catch) p.catch(() => {});
-    } catch {}
+      if (p && p.catch) p.catch(() => this.lockFailed());
+    } catch {
+      this.lockFailed();
+    }
+  }
+
+  // Если захват мыши недоступен (встроенный просмотр и т. п.), играем без него:
+  // обзор — движением мыши и стрелками.
+  lockFailed() {
+    const now = performance.now();
+    if (this.everLocked || this.noLock || now - this.lastFail < 150) return;
+    this.lastFail = now;
+    if (++this.lockFails >= 2) {
+      this.noLock = true;
+      this.game.ui.toast('Захват мыши недоступен: обзор — движением мыши и стрелками', 6000);
+    }
   }
 
   unlock() {
@@ -57,7 +78,7 @@ export class Input {
     this.btn.attack = false;
   }
 
-  update() {
+  update(dt = 0.016) {
     if (!this.active) {
       this.moveF = 0;
       this.moveS = 0;
@@ -69,8 +90,19 @@ export class Input {
       return;
     }
     const k = this.keys;
-    let f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    let s = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    let f;
+    let s;
+    if (this.noLock && !this.touch) {
+      // без захвата мыши стрелки поворачивают взгляд
+      f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
+      s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+      const lx = (k.has('ArrowLeft') ? 1 : 0) - (k.has('ArrowRight') ? 1 : 0);
+      const ly = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
+      if (lx || ly) this.game.player.look(lx * dt * 2.2, ly * dt * 1.6);
+    } else {
+      f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+      s = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    }
     let run = k.has('ShiftLeft') || k.has('ShiftRight') || this.sprintLatch;
     if (this.joy.id !== null) {
       f = -this.joy.y;
@@ -193,10 +225,12 @@ export class Input {
       if (e.button === 2) this.use = false;
     });
     document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === c && this.game.state === 'play') {
+      const free = this.noLock && !this.touch && e.target === c;
+      if ((document.pointerLockElement === c || free) && this.game.state === 'play') {
         this.game.player.look(-e.movementX * this.sens, -e.movementY * this.sens);
       }
     });
+    document.addEventListener('pointerlockerror', () => this.lockFailed());
     c.addEventListener(
       'wheel',
       (e) => {
@@ -208,6 +242,7 @@ export class Input {
     );
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === c) this.everLocked = true;
       this.reset();
       if (document.pointerLockElement !== c && this.game.state === 'play' && !this.touch && !this.noLock) this.game.ui.openMenu();
     });

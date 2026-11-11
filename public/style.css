@@ -7,6 +7,12 @@
   --accent: #ffb547;
   --accent2: #38d9e0;
   --slot: 52px;
+  /* отступы под «чёлку» и системные панели телефона */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
 }
 * {
   box-sizing: border-box;
@@ -88,8 +94,8 @@ input {
 }
 #debug {
   position: absolute;
-  left: 10px;
-  top: 10px;
+  left: calc(10px + var(--sal));
+  top: calc(10px + var(--sat));
   padding: 8px 10px;
   background: var(--bg);
   border-radius: 10px;
@@ -98,8 +104,8 @@ input {
 }
 #mapwrap {
   position: absolute;
-  right: 12px;
-  top: 12px;
+  right: calc(12px + var(--sar));
+  top: calc(12px + var(--sat));
   text-align: center;
 }
 #minimap {
@@ -119,8 +125,8 @@ input {
 }
 #chatlog {
   position: absolute;
-  left: 12px;
-  bottom: 150px;
+  left: calc(12px + var(--sal));
+  bottom: calc(150px + var(--sab));
   width: min(460px, 70vw);
   max-height: 40vh;
   overflow: hidden;
@@ -149,8 +155,8 @@ input {
 }
 #chatinput {
   position: absolute;
-  left: 12px;
-  bottom: 108px;
+  left: calc(12px + var(--sal));
+  bottom: calc(108px + var(--sab));
   width: min(460px, 70vw);
   padding: 9px 12px;
   border: 1px solid var(--line);
@@ -164,7 +170,7 @@ input {
 #toast {
   position: absolute;
   left: 50%;
-  bottom: 112px;
+  bottom: calc(112px + var(--sab));
   transform: translateX(-50%);
   padding: 5px 14px;
   background: var(--bg);
@@ -182,7 +188,7 @@ input {
 #bottom {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  bottom: calc(12px + var(--sab));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -296,8 +302,8 @@ body.touch #clickhint {
 }
 #joy {
   position: absolute;
-  left: max(18px, env(safe-area-inset-left));
-  bottom: 96px;
+  left: max(18px, var(--sal));
+  bottom: calc(96px + var(--sab));
   width: 132px;
   height: 132px;
   border-radius: 50%;
@@ -338,39 +344,39 @@ body.touch #clickhint {
   font-size: 19px;
 }
 #tJump {
-  right: max(18px, env(safe-area-inset-right));
-  bottom: 100px;
+  right: max(18px, var(--sar));
+  bottom: calc(100px + var(--sab));
 }
 #tDown {
-  right: max(18px, env(safe-area-inset-right));
-  bottom: 22px;
+  right: max(18px, var(--sar));
+  bottom: calc(22px + var(--sab));
   display: none;
 }
 body.flying #tDown {
   display: grid;
 }
 #tAttack {
-  right: calc(max(18px, env(safe-area-inset-right)) + 80px);
-  bottom: 142px;
+  right: calc(max(18px, var(--sar)) + 80px);
+  bottom: calc(142px + var(--sab));
 }
 #tUse {
-  right: calc(max(18px, env(safe-area-inset-right)) + 6px);
-  bottom: 182px;
+  right: calc(max(18px, var(--sar)) + 6px);
+  bottom: calc(182px + var(--sab));
 }
 #tInv {
-  left: 12px;
-  top: 12px;
+  left: calc(12px + var(--sal));
+  top: calc(12px + var(--sat));
 }
 #tChat {
-  left: 66px;
-  top: 12px;
+  left: calc(66px + var(--sal));
+  top: calc(12px + var(--sat));
 }
 #tMenu {
-  left: 120px;
-  top: 12px;
+  left: calc(120px + var(--sal));
+  top: calc(12px + var(--sat));
 }
 body.touch #debug {
-  top: 66px;
+  top: calc(66px + var(--sat));
 }
 @media (max-width: 760px) {
   :root {
@@ -401,7 +407,9 @@ body.touch #debug {
   background: rgba(6, 9, 16, 0.55);
   backdrop-filter: blur(3px);
   overflow: auto;
-  padding: 12px;
+  padding-block: max(12px, var(--sat)) max(12px, var(--sab));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
   touch-action: pan-y;
 }
 .panel {
@@ -753,14 +761,14 @@ body.touch #debug {
 
 /* ---------- сенсорные и низкие экраны ---------- */
 body.touch #chatlog {
-  top: 66px;
+  top: calc(66px + var(--sat));
   bottom: auto;
   justify-content: flex-start;
   max-height: 32vh;
   width: min(420px, 52vw);
 }
 body.touch #chatinput {
-  top: 66px;
+  top: calc(66px + var(--sat));
   bottom: auto;
   width: min(420px, 60vw);
   z-index: 2;
@@ -797,7 +805,7 @@ body.touch .inv .hint {
     padding-top: 8px;
   }
   #joy {
-    bottom: 70px;
+    bottom: calc(70px + var(--sab));
     width: 120px;
     height: 120px;
   }

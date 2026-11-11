@@ -29,7 +29,9 @@ export class Net {
   async connect(hello) {
     const q = new URLSearchParams(location.search);
     const forced = q.get('server');
-    const canWs = !q.has('offline') && (forced || location.protocol === 'http:' || location.protocol === 'https:');
+    // window.KUBOZEMYE_OFFLINE = true на странице — сразу одиночный режим (для статического хостинга)
+    const offline = q.has('offline') || globalThis.KUBOZEMYE_OFFLINE === true;
+    const canWs = !offline && (forced || location.protocol === 'http:' || location.protocol === 'https:');
     if (canWs) {
       const url = forced || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
       try {

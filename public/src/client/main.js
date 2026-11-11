@@ -24,7 +24,11 @@ class Game {
     try {
       Object.assign(this.settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
     } catch {}
-    if (matchMedia('(pointer: coarse)').matches && !localStorage.getItem(SETTINGS_KEY)) {
+    let saved = null;
+    try {
+      saved = localStorage.getItem(SETTINGS_KEY);
+    } catch {}
+    if (matchMedia('(pointer: coarse)').matches && !saved) {
       this.settings.dist = 5;
       this.settings.autoJump = true;
     }
@@ -236,7 +240,7 @@ class Game {
     const p = this.player;
     const r = this.renderer;
     const inp = this.input;
-    inp.update();
+    inp.update(dt);
 
     this.world.update(p.pos.x, p.pos.z);
     const bx = Math.floor(p.pos.x);

@@ -42,6 +42,10 @@ export class UI {
   // ---------- старт ----------
   bindStart() {
     const e = this.el;
+    if (globalThis.KUBOZEMYE_OFFLINE === true) {
+      document.querySelector('.tag').textContent =
+        'Воксельная песочница: копай, строй, летай на крюке. Здесь одиночная игра, мультиплеер работает в версии с сервером.';
+    }
     try {
       e.name.value = localStorage.getItem('kubozemye.name') || '';
     } catch {}
