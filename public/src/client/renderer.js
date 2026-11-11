@@ -6,6 +6,8 @@ import { createNoise } from '../shared/noise.js';
 const CHUNK_VS = /* glsl */ `
 attribute vec3 uvl;
 attribute vec4 light;
+uniform float uTime;
+uniform float uFancy;
 varying vec3 vUvl;
 varying vec4 vLight;
 varying float vDist;
@@ -14,6 +16,19 @@ void main() {
   vUvl = uvl;
   vLight = light;
   vec4 wp = modelMatrix * vec4(position, 1.0);
+  if (uFancy > 0.5) {
+    // метки из мешера: вода 1.0, листва ~0.38, верхушки растений ~0.25
+    float w = light.w;
+    if (w > 0.9) {
+      wp.y += (sin(uTime * 1.4 + wp.x * 0.8) + cos(uTime * 1.1 + wp.z * 0.9)) * 0.035;
+    } else if (w > 0.31 && w < 0.44) {
+      wp.x += sin(uTime * 1.3 + wp.y * 1.3 + wp.z * 0.8) * 0.045;
+      wp.z += cos(uTime * 1.1 + wp.y * 1.1 + wp.x * 0.9) * 0.045;
+    } else if (w > 0.19 && w < 0.31) {
+      wp.x += sin(uTime * 1.8 + wp.x * 0.9 + wp.z * 0.7) * 0.1;
+      wp.z += cos(uTime * 1.5 + wp.x * 0.6 + wp.z * 1.1) * 0.1;
+    }
+  }
   vWorld = wp.xyz;
   vec4 mv = viewMatrix * wp;
   vDist = length(mv.xyz);
@@ -30,6 +45,11 @@ uniform float uFogNear;
 uniform float uFogFar;
 uniform float uTime;
 uniform float uAlphaTest;
+uniform float uFancy;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform float uLightPower;
+uniform vec3 uSkyRefl;
 varying vec3 vUvl;
 varying vec4 vLight;
 varying float vDist;
@@ -42,17 +62,121 @@ void main() {
   float l = max(sky, blk);
   float b = 0.05 + 0.95 * pow(l, 1.5);
   vec3 tint = mix(uSkyTint, vec3(1.0, 0.85, 0.6), clamp((blk - sky) * 1.6, 0.0, 1.0));
-  vec3 col = c.rgb * tint * b * vLight.z;
-  if (vLight.w > 0.75) {
-    float w = sin(vWorld.x * 1.3 + uTime * 1.6) * sin(vWorld.z * 1.1 - uTime * 1.2);
-    col += 0.045 * w * b;
-  } else if (vLight.w > 0.25) {
-    // лава медленно переливается
-    float w = sin(vWorld.x * 2.1 + uTime * 0.9) * sin(vWorld.z * 1.7 - uTime * 0.7) + sin(vWorld.y * 2.3 + uTime * 1.1) * 0.5;
-    col *= 1.0 + 0.16 * w;
+  float w = vLight.w;
+  float shade = vLight.z;
+  float alpha = c.a;
+  vec3 N = vec3(0.0, 1.0, 0.0);
+  if (uFancy > 0.5) {
+    // «шейдерный» свет: нормаль грани из производных, солнце и луна освещают по-разному
+    N = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+    bool plant = w > 0.02 && w < 0.31;
+    if (plant) N = vec3(0.0, 1.0, 0.0);
+    float fs = plant ? 0.92 : (N.y > 0.5 ? 1.0 : (N.y < -0.5 ? 0.52 : (abs(N.x) > 0.5 ? 0.8 : 0.66)));
+    float ao = clamp(vLight.z / fs, 0.0, 1.0);
+    float ndl = max(dot(N, uLightDir), 0.0);
+    float skyW = clamp(vLight.x * 1.15, 0.0, 1.0);
+    shade = mix(vLight.z, ao * (0.56 + 0.1 * N.y + 0.42 * ndl * uLightPower), skyW);
+    tint *= mix(vec3(1.0), uLightColor, ndl * skyW * 0.5);
   }
+  vec3 col = c.rgb * tint * b * shade;
+  if (w > 0.9) {
+    if (uFancy > 0.5 && N.y > 0.5) {
+      // вода: рябь, отражение неба под скользящим углом и блик солнца
+      vec2 q = vWorld.xz;
+      float a1 = uTime * 2.6 + q.x * 3.1 + q.y * 2.3;
+      float a2 = uTime * 3.4 + q.x * 5.3 - q.y * 4.1;
+      float dx = 0.028 * cos(uTime * 1.4 + q.x * 0.8) + 0.037 * cos(a1) + 0.053 * cos(a2);
+      float dz = -0.031 * sin(uTime * 1.1 + q.y * 0.9) + 0.028 * cos(a1) - 0.041 * cos(a2);
+      vec3 Nw = normalize(vec3(-dx * 2.0, 1.0, -dz * 2.0));
+      vec3 V = normalize(cameraPosition - vWorld);
+      float fres = pow(1.0 - max(dot(Nw, V), 0.0), 3.0);
+      float spec = pow(max(dot(reflect(-uLightDir, Nw), V), 0.0), 90.0) * uLightPower * vLight.x;
+      col = mix(col, uSkyRefl * b, fres * 0.7);
+      col += uLightColor * spec * 1.6;
+      alpha = mix(alpha, 0.96, fres * 0.8);
+    } else {
+      float s = sin(vWorld.x * 1.3 + uTime * 1.6) * sin(vWorld.z * 1.1 - uTime * 1.2);
+      col += 0.045 * s * b;
+    }
+  } else if (w > 0.44 && w < 0.56) {
+    // лава медленно переливается
+    float s = sin(vWorld.x * 2.1 + uTime * 0.9) * sin(vWorld.z * 1.7 - uTime * 0.7) + sin(vWorld.y * 2.3 + uTime * 1.1) * 0.5;
+    col *= 1.0 + 0.16 * s;
+  }
+  // светящиеся блоки в режиме шейдеров выходят за пределы яркости и дают ореол
+  col *= 1.0 + uFancy * 0.9 * smoothstep(0.94, 1.0, blk);
   col = mix(col, uFogColor, smoothstep(uFogNear, uFogFar, vDist));
-  gl_FragColor = vec4(col, c.a);
+  gl_FragColor = vec4(col, alpha);
+}`;
+
+// --- постобработка (режим «шейдеры»): свечение, лучи солнца, цветокоррекция ---
+const QUAD_VS = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+const BRIGHT_FS = /* glsl */ `
+uniform sampler2D tMap;
+uniform vec2 uKnee;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tMap, vUv).rgb;
+  float m = max(c.r, max(c.g, c.b));
+  gl_FragColor = vec4(c * smoothstep(uKnee.x, uKnee.y, m), 1.0);
+}`;
+
+const BLUR_FS = /* glsl */ `
+uniform sampler2D tMap;
+uniform vec2 uStep;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tMap, vUv).rgb * 0.227;
+  c += (texture2D(tMap, vUv + uStep * 1.385).rgb + texture2D(tMap, vUv - uStep * 1.385).rgb) * 0.316;
+  c += (texture2D(tMap, vUv + uStep * 3.231).rgb + texture2D(tMap, vUv - uStep * 3.231).rgb) * 0.070;
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+const FINAL_FS = /* glsl */ `
+uniform sampler2D tScene;
+uniform sampler2D tBloom;
+uniform vec2 uSun;
+uniform float uSunVis;
+uniform vec3 uRayColor;
+uniform float uTime;
+uniform float uUnder;
+varying vec2 vUv;
+vec3 shoulder(vec3 x) {
+  // мягко сжимает пересвет выше 0.75, не трогая остальное
+  vec3 hi = 0.75 + (1.0 - exp(-(x - 0.75) * 3.2)) * 0.25;
+  return mix(x, hi, step(0.75, x));
+}
+void main() {
+  vec2 uv = vUv;
+  if (uUnder > 0.5) uv += vec2(sin(uv.y * 30.0 + uTime * 3.0), cos(uv.x * 28.0 + uTime * 2.6)) * 0.004;
+  vec3 c = texture2D(tScene, uv).rgb;
+  c += texture2D(tBloom, uv).rgb * 0.4;
+  if (uSunVis > 0.01) {
+    // лучи: копим яркость вдоль отрезка к солнцу, препятствия дают тёмные полосы
+    vec2 d = (uSun - uv) / 24.0;
+    vec2 p = uv;
+    float decay = 1.0;
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 24; i++) {
+      p += d;
+      acc += texture2D(tBloom, p).rgb * decay;
+      decay *= 0.95;
+    }
+    c += acc / 24.0 * uRayColor * uSunVis * 0.55;
+  }
+  c = shoulder(c);
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.16);
+  float lum = dot(c, vec3(0.299, 0.587, 0.114));
+  c = mix(vec3(lum), c, 1.07);
+  float v = smoothstep(1.0, 0.35, length((vUv - 0.5) * vec2(1.25, 1.0)));
+  c *= mix(0.8, 1.0, v);
+  gl_FragColor = vec4(c, 1.0);
 }`;
 
 const SKY_VS = /* glsl */ `
@@ -155,9 +279,13 @@ function cloudTexture() {
 export class Renderer {
   constructor(canvas, tiles) {
     this.canvas = canvas;
+    // Цвета считаем «как есть» (в sRGB) и на экране, и в буферах постобработки,
+    // чтобы картинка с шейдерами и без них совпадала по тону.
+    THREE.ColorManagement.enabled = false;
     this.r = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.r.autoClear = false;
+    this.r.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.06, 1500);
     this.camera.rotation.order = 'YXZ';
@@ -183,6 +311,11 @@ export class Renderer {
       uFogNear: { value: 60 },
       uFogFar: { value: 110 },
       uTime: { value: 0 },
+      uFancy: { value: 0 },
+      uLightDir: { value: new THREE.Vector3(0, 1, 0) },
+      uLightColor: { value: new THREE.Color(1, 1, 1) },
+      uLightPower: { value: 1 },
+      uSkyRefl: { value: new THREE.Color(0.6, 0.8, 1) },
     };
     const mk = (alphaTest, extra) =>
       new THREE.ShaderMaterial({
@@ -206,6 +339,11 @@ export class Renderer {
         uFogFar: { value: 2e6 },
         uTime: { value: 0 },
         uAlphaTest: { value: 0.4 },
+        uFancy: { value: 0 },
+        uLightDir: { value: new THREE.Vector3(0, 1, 0) },
+        uLightColor: { value: new THREE.Color(1, 1, 1) },
+        uLightPower: { value: 1 },
+        uSkyRefl: { value: new THREE.Color(0.6, 0.8, 1) },
       },
       vertexShader: CHUNK_VS,
       fragmentShader: CHUNK_FS,
@@ -296,17 +434,24 @@ export class Renderer {
     this.scene.add(this.clouds);
 
     // --- свет для существ ---
-    this.hemi = new THREE.HemisphereLight(0xffffff, 0x77808c, 1.6);
-    this.dir = new THREE.DirectionalLight(0xffffff, 1.4);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x8a93a0, 2.4);
+    this.dir = new THREE.DirectionalLight(0xffffff, 1.1);
     this.scene.add(this.hemi, this.dir);
 
     // --- сцена предмета в руке ---
     this.handScene = new THREE.Scene();
     this.handCam = new THREE.PerspectiveCamera(60, 1, 0.01, 10);
-    this.handScene.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 2.2));
+    this.handScene.add(new THREE.HemisphereLight(0xffffff, 0x9aa2b0, 3.0));
 
     this.fogDist = 100;
     this.underwater = 0; // 0 нет, 1 в воде, 2 в лаве
+
+    // --- постобработка ---
+    this.fancy = false;
+    this.post = null;
+    this.sunVis = 0;
+    this.sunUv = new THREE.Vector2(0.5, 0.5);
+    this.rayColor = new THREE.Color(1, 0.9, 0.7);
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -319,6 +464,76 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
     this.handCam.aspect = w / h;
     this.handCam.updateProjectionMatrix();
+    if (this.post) this.sizePost();
+  }
+
+  // Включает или выключает «шейдеры»: солнечный свет по граням, рябь и блики на воде,
+  // колыхание листвы, свечение, лучи солнца и цветокоррекцию.
+  setShaders(on) {
+    on = !!on;
+    if (on && !this.post) {
+      try {
+        this.buildPost();
+      } catch (e) {
+        console.warn('Шейдеры недоступны на этом устройстве:', e);
+        this.post = null;
+        on = false;
+      }
+    }
+    this.fancy = on;
+    this.uniforms.uFancy.value = on ? 1 : 0;
+    // солнце ярче единицы даёт ореол и лучи
+    this.sun.material.color.setScalar(on && this.post && this.post.hdr ? 2 : 1);
+    return on;
+  }
+
+  buildPost() {
+    const r = this.r;
+    const gl = r.getContext();
+    const hdr = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+    const type = hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
+    const opts = { type, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false };
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    const scene = new THREE.WebGLRenderTarget(4, 4, { ...opts, depthBuffer: true, samples: coarse ? 0 : 4 });
+    const a = new THREE.WebGLRenderTarget(4, 4, opts);
+    const b = new THREE.WebGLRenderTarget(4, 4, opts);
+    const mat = (fs, uniforms) =>
+      new THREE.ShaderMaterial({ uniforms, vertexShader: QUAD_VS, fragmentShader: fs, depthTest: false, depthWrite: false });
+    const bright = mat(BRIGHT_FS, { tMap: { value: null }, uKnee: { value: hdr ? new THREE.Vector2(1.05, 1.7) : new THREE.Vector2(0.88, 1.0) } });
+    const blur = mat(BLUR_FS, { tMap: { value: null }, uStep: { value: new THREE.Vector2() } });
+    const final = mat(FINAL_FS, {
+      tScene: { value: scene.texture },
+      tBloom: { value: a.texture },
+      uSun: { value: this.sunUv },
+      uSunVis: { value: 0 },
+      uRayColor: { value: this.rayColor },
+      uTime: { value: 0 },
+      uUnder: { value: 0 },
+    });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bright);
+    quad.frustumCulled = false;
+    const qScene = new THREE.Scene();
+    qScene.add(quad);
+    this.post = { hdr, scene, a, b, bright, blur, final, quad, qScene, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), bw: 1, bh: 1 };
+    this.sizePost();
+  }
+
+  sizePost() {
+    const p = this.post;
+    const v = this.r.getDrawingBufferSize(new THREE.Vector2());
+    p.scene.setSize(v.x, v.y);
+    p.bw = Math.max(2, Math.round(v.x / 4));
+    p.bh = Math.max(2, Math.round(v.y / 4));
+    p.a.setSize(p.bw, p.bh);
+    p.b.setSize(p.bw, p.bh);
+  }
+
+  pass(material, input, target) {
+    const p = this.post;
+    if (material.uniforms.tMap) material.uniforms.tMap.value = input;
+    p.quad.material = material;
+    this.r.setRenderTarget(target);
+    this.r.render(p.qScene, p.cam);
   }
 
   setFov(f) {
@@ -351,6 +566,8 @@ export class Renderer {
     u.uDay.value = lerp(0.36, 1, day);
     u.uSkyTint.value.setRGB(lerp(0.6, 1, day), lerp(0.7, 1, day), 1).lerp(new THREE.Color(1, 0.82, 0.68), dusk * 0.5);
     u.uTime.value = elapsed;
+    // предмет в руке ночью тоже темнеет, но остаётся различимым
+    this.handMat.uniforms.uDay.value = Math.max(0.6, u.uDay.value);
     if (this.underwater === 2) {
       u.uFogColor.value.setRGB(0.95, 0.38, 0.05);
       u.uFogNear.value = 0.2;
@@ -380,15 +597,58 @@ export class Renderer {
     this.cloudU.uOffset.value.set(cam.x / 400 + elapsed * 0.004, -cam.z / 400);
     this.cloudU.uColor.value.setRGB(lerp(0.16, 1, day), lerp(0.18, 1, day), lerp(0.26, 1, day)).lerp(new THREE.Color(1, 0.72, 0.55), dusk * 0.6);
 
-    this.hemi.intensity = lerp(0.45, 1.7, day);
-    this.dir.intensity = lerp(0.1, 1.5, day);
+    this.hemi.intensity = lerp(0.8, 2.4, day);
+    this.dir.intensity = lerp(0.12, 1.1, day);
     this.dir.position.copy(sunH > 0 ? sunDir : sunDir.clone().negate());
+
+    // --- свет для режима «шейдеры» ---
+    const sunUp = sunH > -0.04;
+    u.uLightDir.value.copy(sunUp ? sunDir : sunDir.clone().negate());
+    u.uLightPower.value = sunUp ? sstep(-0.04, 0.22, sunH) : 0.3 * sstep(0.04, 0.3, -sunH);
+    if (sunUp) u.uLightColor.value.setRGB(1, 0.97, 0.9).lerp(new THREE.Color(1, 0.66, 0.38), dusk * 0.85);
+    else u.uLightColor.value.setRGB(0.62, 0.74, 1);
+    u.uSkyRefl.value.copy(hor).lerp(top, 0.35);
+    if (this.fancy) {
+      // где солнце на экране и насколько видны его лучи
+      const fwd = this.camera.getWorldDirection(new THREE.Vector3());
+      const facing = fwd.dot(sunDir);
+      const ndc = this.sun.position.clone().project(this.camera);
+      this.sunUv.set(ndc.x * 0.5 + 0.5, ndc.y * 0.5 + 0.5);
+      const off = Math.max(Math.abs(ndc.x), Math.abs(ndc.y));
+      this.sunVis = facing > 0.05 && !this.underwater ? sstep(-0.1, 0.12, sunH) * sstep(1.7, 1.0, off) : 0;
+      this.rayColor.setRGB(1, 0.9, 0.7).lerp(new THREE.Color(1, 0.55, 0.25), dusk * 0.8).multiplyScalar(0.9);
+    }
+    this.elapsed = elapsed;
   }
 
   render() {
-    this.r.clear();
-    this.r.render(this.scene, this.camera);
-    this.r.clearDepth();
-    this.r.render(this.handScene, this.handCam);
+    const r = this.r;
+    if (!this.fancy || !this.post) {
+      r.setRenderTarget(null);
+      r.clear();
+      r.render(this.scene, this.camera);
+      r.clearDepth();
+      r.render(this.handScene, this.handCam);
+      return;
+    }
+    const p = this.post;
+    r.setRenderTarget(p.scene);
+    r.clear();
+    r.render(this.scene, this.camera);
+    r.clearDepth();
+    r.render(this.handScene, this.handCam);
+    // яркие области -> размытие в два прохода (второй шире)
+    this.pass(p.bright, p.scene.texture, p.a);
+    for (const k of [1, 2.4]) {
+      p.blur.uniforms.uStep.value.set(k / p.bw, 0);
+      this.pass(p.blur, p.a.texture, p.b);
+      p.blur.uniforms.uStep.value.set(0, k / p.bh);
+      this.pass(p.blur, p.b.texture, p.a);
+    }
+    const f = p.final.uniforms;
+    f.uSunVis.value = this.sunVis;
+    f.uTime.value = this.elapsed || 0;
+    f.uUnder.value = this.underwater === 1 ? 1 : 0;
+    this.pass(p.final, null, null);
   }
 }

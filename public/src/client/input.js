@@ -183,6 +183,12 @@ export class Input {
         case 'KeyM':
           g.ui.toggleMap();
           break;
+        case 'KeyG':
+          g.settings.shaders = !g.settings.shaders;
+          g.applySettings();
+          g.ui.syncSettings();
+          g.ui.toast(g.settings.shaders ? 'Шейдеры включены' : 'Шейдеры выключены');
+          break;
         case 'Tab':
           g.ui.showPlayers(true);
           break;

@@ -1,6 +1,6 @@
 // Все текстуры игры рисуются кодом: тайлы блоков 16x16, спрайты растений,
 // иконки предметов и стадии трещин. Никаких внешних картинок.
-import { TILES, BLOCKS, ITEMS, PAINTS, TIER_NAMES, I } from '../shared/blocks.js';
+import { TILES, BLOCKS, ITEMS, PAINTS, TIER_NAMES, ARMOR_TIERS, I } from '../shared/blocks.js';
 import { mulberry32 } from '../shared/noise.js';
 
 export const TS = 16;
@@ -502,6 +502,34 @@ const TOOL_SPR = {
     '....sgg.........', '...sS.gg........', '..sS...g........', '.sS.............', '................',
   ],
 };
+const ARMOR_PAL = {
+  quilt: { h: 0xe6d7b5, H: 0xfaf0d8, d: 0xa8946a },
+  copper: { h: 0xe08a50, H: 0xf7b987, d: 0xa85d30 },
+  crystal: { h: 0xc86bff, H: 0xf0c9ff, d: 0x8a35c9 },
+};
+const ARMOR_SPR = [
+  [
+    '................', '................', '....dhhhhhhd....', '...dhHHHHHHhd...', '..dhHHhhhhhhhd..', '..dhHhhhhhhhhd..',
+    '..dhhhhhhhhhhd..', '..dhhhhhhhhhhd..', '..dhhd....dhhd..', '..dhhd....dhhd..', '..dhd......dhd..',
+    '..dd........dd..', '................', '................', '................', '................',
+  ],
+  [
+    '................', '..dhd......dhd..', '.dhhhd....dhhhd.', '.dhHhhddddhhhhd.', '.dhHhhhhhhhhhhd.', '..dhHhhhhhhhhd..',
+    '..dhHhhhhhhhhd..', '...dhhhhhhhhd...', '...dhhhhhhhhd...', '...dhhhhhhhhd...', '...dhhhhhhhhd...',
+    '...dhhhhhhhhd...', '...dddddddddd...', '................', '................', '................',
+  ],
+  [
+    '................', '................', '...dddddddddd...', '...dhHhhhhhhd...', '...dhHhhhhhhd...', '...dhhhddhhhd...',
+    '...dhhd..dhhd...', '...dhhd..dhhd...', '...dhhd..dhhd...', '...dhhd..dhhd...', '...dhhd..dhhd...',
+    '...dhhd..dhhd...', '...dddd..dddd...', '................', '................', '................',
+  ],
+  [
+    '................', '................', '................', '................', '................', '..dddd....dddd..',
+    '..dhHd....dhHd..', '..dhhd....dhhd..', '..dhhd....dhhd..', '.ddhhd....dhhdd.', 'dhhhhd....dhhhhd',
+    'dhhhhd....dhhhhd', 'dddddd....dddddd', '................', '................', '................',
+  ],
+];
+
 const BUCKET_ROWS = [
   '................', '................', '....hhhhhhhh....', '...h........h...', '..hhhhhhhhhhhh..', '..gddddddddddg..',
   '..gdwddddddddg..', '..gGGGGGGGGGGg..', '...gGGGGGGGGg...', '...gGGLGGGGGg...', '...gGGLGGGGGg...',
@@ -672,7 +700,8 @@ export function buildIcons(tiles) {
   for (const id of Object.keys(ITEMS)) {
     const it = ITEMS[id];
     let spr;
-    if (it.tool) spr = spriteCanvas(TOOL_SPR[it.tool.type], { ...STICK_PAL, ...TIER_PAL[TIER_NAMES[it.tool.tier]] });
+    if (it.armor) spr = spriteCanvas(ARMOR_SPR[it.armor.slot], ARMOR_PAL[ARMOR_TIERS[it.armor.tier]]);
+    else if (it.tool) spr = spriteCanvas(TOOL_SPR[it.tool.type], { ...STICK_PAL, ...TIER_PAL[TIER_NAMES[it.tool.tier]] });
     else if (ITEM_SPR[it.key]) spr = spriteCanvas(ITEM_SPR[it.key][0], ITEM_SPR[it.key][1]);
     else continue;
     const [c, g] = mk();
@@ -706,6 +735,69 @@ export function buildCracks(stages = 6) {
     out.push(tileCanvas(t.d));
   }
   return out;
+}
+
+// Маска Морока — показывается на полсекунды, когда он нападает.
+export function buildMask() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 320;
+  const g = c.getContext('2d');
+  g.fillStyle = '#050305';
+  g.fillRect(0, 0, 256, 320);
+  // рога-ветви
+  g.strokeStyle = '#1d1712';
+  g.lineWidth = 9;
+  g.lineCap = 'round';
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(128 + s * 44, 86);
+    g.lineTo(128 + s * 84, 30);
+    g.lineTo(128 + s * 112, 12);
+    g.moveTo(128 + s * 84, 30);
+    g.lineTo(128 + s * 70, 4);
+    g.moveTo(128 + s * 66, 56);
+    g.lineTo(128 + s * 108, 54);
+    g.stroke();
+  }
+  // бледная вытянутая маска
+  const gr = g.createRadialGradient(128, 150, 20, 128, 170, 130);
+  gr.addColorStop(0, '#f2ecdb');
+  gr.addColorStop(0.7, '#cfc6ae');
+  gr.addColorStop(1, '#7d7462');
+  g.fillStyle = gr;
+  g.beginPath();
+  g.ellipse(128, 170, 78, 118, 0, 0, Math.PI * 2);
+  g.fill();
+  // пустые глазницы с красными точками
+  g.fillStyle = '#060406';
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.ellipse(128 + s * 34, 140, 20, 30, s * 0.25, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = '#ff2a2a';
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.arc(128 + s * 34, 146, 4.5, 0, Math.PI * 2);
+    g.fill();
+  }
+  // трещина-рот
+  g.strokeStyle = '#0a0608';
+  g.lineWidth = 7;
+  g.beginPath();
+  g.moveTo(128, 196);
+  g.lineTo(122, 222);
+  g.lineTo(132, 244);
+  g.lineTo(126, 272);
+  g.stroke();
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(96, 92);
+  g.lineTo(110, 118);
+  g.lineTo(104, 132);
+  g.stroke();
+  return c.toDataURL();
 }
 
 export { I };

@@ -1,6 +1,6 @@
 // Интерфейс: панель быстрого доступа, рюкзак, крафт, чат, меню, подсказки.
-import { RECIPES, CREATIVE_ITEMS, itemName, maxStack } from '../shared/blocks.js';
-import { HOTBAR, SLOTS } from './inventory.js';
+import { RECIPES, CREATIVE_ITEMS, ITEMS, ARMOR_SLOTS, itemName, maxStack } from '../shared/blocks.js';
+import { HOTBAR, SLOTS, TOTAL } from './inventory.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +13,7 @@ export class UI {
       'inventory', 'side', 'bag', 'bar', 'held', 'tabCraft', 'tabAll', 'invClose', 'menu', 'netinfo', 'mResume', 'mMode',
       'sDist', 'sFov', 'sSens', 'sVol', 'vDist', 'vFov', 'vSens', 'vVol', 'cJump', 'death', 'dRespawn', 'lost', 'lReload',
       'loading', 'loadtext', 'start', 'name', 'play', 'starterr',
+      'armor', 'armorinfo', 'armorhud', 'cShaders', 'cHorror', 'dread', 'scare',
     ]) {
       this.el[id] = $(id);
     }
@@ -118,6 +119,36 @@ export class UI {
     }
   }
 
+  // Показатель защиты над полоской здоровья.
+  setArmor() {
+    const g = this.game;
+    const pts = g.inv.armorPoints();
+    const el = this.el.armorhud;
+    el.classList.toggle('hidden', pts === 0 || g.player.mode !== 's');
+    el.textContent = '🛡 ' + pts;
+  }
+
+  // Морок рядом: темнеют края экрана. k от 0 до 1.
+  setDread(k) {
+    const v = k.toFixed(2);
+    if (this.dreadV !== v) {
+      this.dreadV = v;
+      this.el.dread.style.opacity = v;
+    }
+  }
+
+  // Морок напал: на полсекунды показываем его маску.
+  scare() {
+    const el = this.el.scare;
+    el.style.backgroundImage = `url(${this.game.maskImage})`;
+    el.classList.remove('hidden');
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+    clearTimeout(this.scareTimer);
+    this.scareTimer = setTimeout(() => el.classList.add('hidden'), 520);
+  }
+
   setHp(hp) {
     const h = this.el.hp;
     h.firstElementChild.style.width = (hp / 20) * 100 + '%';
@@ -130,6 +161,7 @@ export class UI {
     this.el.mMode.textContent = p.mode === 's' ? 'Режим: Выживание → сменить на Творчество' : 'Режим: Творчество → сменить на Выживание';
     this.tab = p.mode === 'c' ? 'all' : 'craft';
     this.el.tabAll.classList.toggle('hidden', p.mode !== 'c');
+    this.setArmor();
   }
 
   toast(text, ms = 1800) {
@@ -275,13 +307,25 @@ export class UI {
     };
     mkSlots(e.bag, HOTBAR, SLOTS);
     mkSlots(e.bar, 0, HOTBAR);
+    mkSlots(e.armor, SLOTS, TOTAL);
   }
 
   clickSlot(i, right, shift) {
     const inv = this.game.inv;
     const s = inv.slots[i];
     const h = this.held;
-    if (shift && s && !h) {
+    if (i >= SLOTS) {
+      // слот брони: принимает только свой тип
+      const a = h && ITEMS[h.id] ? ITEMS[h.id].armor : null;
+      if (h && (!a || a.slot !== i - SLOTS)) {
+        this.toast('Сюда надевается: ' + ARMOR_SLOTS[i - SLOTS].toLowerCase());
+        return;
+      }
+      inv.slots[i] = h;
+      this.held = s;
+    } else if (shift && s && !h && ITEMS[s.id] && ITEMS[s.id].armor) {
+      inv.equipFrom(i); // быстрый способ надеть
+    } else if (shift && s && !h) {
       // быстрый перенос между рюкзаком и панелью
       const [a, b] = i < HOTBAR ? [HOTBAR, SLOTS] : [0, HOTBAR];
       const max = maxStack(s.id);
@@ -341,6 +385,15 @@ export class UI {
       d.classList.toggle('sel', Number(d.dataset.i) === inv.sel);
     }
     e.held.innerHTML = this.slotHtml(this.held);
+    for (const d of e.armor.children) {
+      const s = inv.slots[d.dataset.i];
+      const k = d.dataset.i - SLOTS;
+      d.innerHTML = s ? this.slotHtml(s) : ARMOR_SLOTS[k].slice(0, 4);
+      d.classList.toggle('full', !!s);
+      d.title = s ? itemName(s.id) : ARMOR_SLOTS[k];
+    }
+    const pts = inv.armorPoints();
+    e.armorinfo.innerHTML = `Защита: <b>${pts}</b><br>−${Math.min(80, pts * 4)}% урона от мобов и взрывов`;
     for (const d of [...e.bag.children, ...e.bar.children]) {
       const s = inv.slots[d.dataset.i];
       d.title = s ? itemName(s.id) : '';
@@ -433,6 +486,8 @@ export class UI {
       e.sSens.value = s.sens;
       e.sVol.value = s.vol;
       e.cJump.checked = s.autoJump;
+      e.cShaders.checked = s.shaders;
+      e.cHorror.checked = s.horror;
       e.vDist.textContent = s.dist + ' чанков';
       e.vFov.textContent = s.fov + '°';
       e.vSens.textContent = s.sens;
@@ -450,6 +505,8 @@ export class UI {
     on(e.sSens, 'sens');
     on(e.sVol, 'vol');
     on(e.cJump, 'autoJump', true);
+    on(e.cShaders, 'shaders', true);
+    on(e.cHorror, 'horror', true);
     sync();
   }
 

@@ -2,7 +2,7 @@
 import * as THREE from './three.js';
 import { B, I, BLOCKS, itemName } from '../shared/blocks.js';
 import { DAY_LENGTH } from '../shared/constants.js';
-import { buildTiles, buildIcons, buildCracks } from './textures.js';
+import { buildTiles, buildIcons, buildCracks, buildMask } from './textures.js';
 import { Renderer } from './renderer.js';
 import { World } from './world.js';
 import { Net } from './net.js';
@@ -15,7 +15,7 @@ import { UI } from './ui.js';
 import { Minimap } from './minimap.js';
 
 const SETTINGS_KEY = 'kubozemye.settings';
-const DEFAULTS = { dist: 7, fov: 75, sens: 5, vol: 6, autoJump: false };
+const DEFAULTS = { dist: 7, fov: 75, sens: 5, vol: 6, autoJump: false, shaders: true, horror: true };
 
 class Game {
   constructor() {
@@ -31,6 +31,7 @@ class Game {
     if (matchMedia('(pointer: coarse)').matches && !saved) {
       this.settings.dist = 5;
       this.settings.autoJump = true;
+      this.settings.shaders = false; // на телефонах шейдеры по умолчанию выключены — их можно включить в меню
     }
     this.state = 'start';
     this.joined = false;
@@ -48,6 +49,9 @@ class Game {
     this.tiles = buildTiles();
     this.icons = buildIcons(this.tiles);
     this.cracks = buildCracks();
+    this.maskImage = buildMask();
+    this.beatT = 0;
+    this.morokSeen = false;
     this.renderer = new Renderer(this.canvas, this.tiles);
     this.net = new Net();
     this.sound = new Sound();
@@ -61,6 +65,7 @@ class Game {
     this.minimap = new Minimap(this, document.getElementById('minimap'));
     this.inv.onChange = () => {
       this.ui.renderHotbar();
+      this.ui.setArmor();
       this.player.dirty = true;
     };
     this.applySettings();
@@ -80,6 +85,12 @@ class Game {
     this.renderer.setRenderDist(s.dist);
     this.input.sens = 0.0005 * s.sens;
     this.sound.setVolume(s.vol / 10);
+    if (this.renderer.fancy !== !!s.shaders && !this.renderer.setShaders(s.shaders) && s.shaders) {
+      s.shaders = false;
+      this.ui.toast('Шейдеры не поддерживаются этим устройством');
+      if (this.ui.syncSettings) this.ui.syncSettings();
+    }
+    if (this.joined) this.net.send({ t: 'pref', horror: !!s.horror });
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {}
@@ -140,6 +151,7 @@ class Game {
     }
     this.joined = true;
     this.fresh = w.you.fresh;
+    this.net.send({ t: 'pref', horror: !!this.settings.horror });
     this.ui.onJoined();
     this.ui.setLoading('Создаём мир…');
     this.state = 'loading';
@@ -173,10 +185,23 @@ class Game {
     n.on('m', (m) => ent().onMobs(m.l));
     n.on('md', (m) => {
       ent().removeMob(m.id);
+      if (m.k === 3) {
+        // Морок рассыпается чёрным пеплом
+        ent().particles.burst(m.p[0], m.p[1] + 1.3, m.p[2], 60, [24, 20, 30], 2.5, 0.9, -0.1, 1.4);
+        this.sound.play('whisper', this.volAt(m.p));
+        return;
+      }
       ent().particles.burst(m.p[0], m.p[1] + 0.4, m.p[2], 22, m.k === 0 ? [255, 255, 255] : [120, 80, 200], 3.5, 0.3, 0.5, 0.8);
       this.sound.play('mobdie', this.volAt(m.p));
     });
-    n.on('hurt', (m) => this.player.damage(m.d, m.p));
+    n.on('hurt', (m) => {
+      if (m.k === 'morok' && this.player.mode === 's' && !this.player.dead) {
+        this.ui.scare();
+        this.sound.play('screech');
+        this.shake = 1;
+      }
+      this.player.damage(m.d, m.p, 'mob');
+    });
     n.on('give', (m) => {
       this.inv.add(m.id, m.n);
       this.sound.play('pop');
@@ -220,7 +245,7 @@ class Game {
         pl.vel.y += 5 + (dy / l) * 10 * f;
         pl.vel.z += (dz / l) * 16 * f;
         pl.onGround = false;
-        pl.damage(Math.round(17 * f), null);
+        pl.damage(Math.round(17 * f), null, 'boom');
       }
     });
   }
@@ -297,13 +322,30 @@ class Game {
     if (this.posTimer <= 0 && this.ready) {
       this.posTimer = 0.08;
       const q = (v) => Math.round(v * 100) / 100;
-      this.net.send({ t: 'pos', p: [q(p.pos.x), q(p.pos.y), q(p.pos.z)], r: [q(p.yaw), q(p.pitch)], h: this.inv.selectedId() });
+      this.net.send({ t: 'pos', p: [q(p.pos.x), q(p.pos.y), q(p.pos.z)], r: [q(p.yaw), q(p.pitch)], h: this.inv.selectedId(), a: this.inv.armorCode() });
     }
     this.saveTimer -= dt;
     if (this.saveTimer <= 0 && p.dirty) {
       this.saveTimer = 3;
       p.dirty = false;
       this.net.send({ t: 'save', inv: this.inv.toJSON(), hp: p.hp, mode: p.mode });
+    }
+
+    // Морок поблизости: темнеют края экрана и стучит сердце — тем чаще, чем он ближе
+    let near = 99;
+    for (const m of this.entities.mobs.values()) {
+      if (m.type === 3) near = Math.min(near, m.group.position.distanceTo(p.pos));
+    }
+    const dread = p.mode === 's' && !p.dead ? Math.max(0, Math.min(1, 1 - near / 26)) : 0;
+    this.ui.setDread(dread * 0.85);
+    if (near < 60 && !this.morokSeen) this.sound.play('whisper', 0.8);
+    this.morokSeen = near < 60;
+    if (dread > 0) {
+      this.beatT -= dt;
+      if (this.beatT <= 0) {
+        this.beatT = 0.38 + (1 - dread) * 0.9;
+        this.sound.play('heart', 0.35 + dread * 0.65);
+      }
     }
 
     // HUD

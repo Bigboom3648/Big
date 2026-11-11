@@ -116,6 +116,20 @@ export class Sound {
       case 'boing':
         this.tone(190 * r, 620, 0.24, 'sine', 0.35 * vol);
         break;
+      case 'heart':
+        this.tone(62, 38, 0.13, 'sine', 0.9 * vol);
+        this.tone(54, 34, 0.15, 'sine', 0.7 * vol, 0.17);
+        break;
+      case 'whisper':
+        this.noise(1.6, 2600, 6, 0.1 * vol, 'bandpass');
+        this.noise(1.2, 1400, 8, 0.08 * vol, 'bandpass', 0.35);
+        this.tone(180, 90, 1.5, 'sine', 0.05 * vol);
+        break;
+      case 'screech':
+        this.tone(1900, 320, 0.55, 'sawtooth', 0.32 * vol);
+        this.tone(1340, 240, 0.6, 'square', 0.14 * vol, 0.02);
+        this.noise(0.5, 3200, 1.2, 0.5 * vol, 'bandpass');
+        break;
       case 'splash':
         this.noise(0.28, 900 * r, 0.7, 0.45 * vol, 'lowpass');
         this.tone(420 * r, 160, 0.16, 'sine', 0.12 * vol);

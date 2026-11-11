@@ -65,10 +65,40 @@ class RemotePlayer {
     this.footL = foot();
     this.footR = foot();
     this.group.add(body, this.head, this.handL, this.handR, this.footL, this.footR);
+    // броня: шлем вместо колпака, кираса, пояс поножей, цвет ботинок
+    this.hat = hat;
+    this.footMat = darkMat;
+    this.footBase = darkMat.color.getHex();
+    this.armorMats = [0, 1, 2, 3].map(() => new THREE.MeshLambertMaterial({ color: 0xffffff }));
+    this.helmet = new THREE.Mesh(new THREE.SphereGeometry(0.285, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), this.armorMats[0]);
+    this.head.add(this.helmet);
+    this.plate = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.3, 0.44, 12), this.armorMats[1]);
+    this.plate.position.y = 0.9;
+    this.belt = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.27, 0.26, 12), this.armorMats[2]);
+    this.belt.position.y = 0.52;
+    this.group.add(this.plate, this.belt);
+    this.armorCode = -1;
+    this.setArmor(0);
     this.tag = nameSprite(info.name, info.color);
     this.tag.position.y = 2.1;
     this.group.add(this.tag);
     this.pose(0);
+  }
+
+  // code — упакованные уровни брони по слотам (см. Inventory.armorCode)
+  setArmor(code) {
+    if (code === this.armorCode) return;
+    this.armorCode = code;
+    const tier = (k) => ((code >> (k * 2)) & 3) - 1;
+    const parts = [this.helmet, this.plate, this.belt];
+    for (let k = 0; k < 3; k++) {
+      const t = tier(k);
+      parts[k].visible = t >= 0;
+      if (t >= 0) this.armorMats[k].color.setHex(ARMOR_COLORS[t]);
+    }
+    this.hat.visible = tier(0) < 0;
+    const boots = tier(3);
+    this.footMat.color.setHex(boots >= 0 ? ARMOR_COLORS[boots] : this.footBase);
   }
 
   pose(s) {
@@ -93,6 +123,7 @@ class RemotePlayer {
 }
 
 const FLUFF_COLORS = [0xffffff, 0xfff1d6, 0xffdfe8, 0xe2f0ff];
+const ARMOR_COLORS = [0xe6d7b5, 0xe08a50, 0xc86bff]; // стёганая, медная, кристальная
 
 class MobView {
   constructor(id, type, x, y, z, job = 0) {
@@ -114,7 +145,81 @@ class MobView {
       this.mats.push(m);
       return m;
     };
-    if (type === 2) {
+    if (type === 3) {
+      // Морок: высокая тощая тень с бледной маской и рогами-ветвями
+      const dark = lam(0x0d0c11);
+      const bark = lam(0x1d1712);
+      const bone = lam(0xe6dfcc, 0x1a1814);
+      this.body = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.25, 1.25, 6), dark);
+      this.body.position.y = 1.55;
+      const leg = () => new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.05, 1.0, 5), dark);
+      this.legL = leg();
+      this.legR = leg();
+      this.legL.position.set(-0.12, 0.5, 0);
+      this.legR.position.set(0.12, 0.5, 0);
+      // длинные руки до колен с когтями
+      const arm = (side) => {
+        const g = new THREE.Group();
+        g.position.set(side * 0.24, 2.08, 0);
+        const bone1 = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.035, 1.45, 5), dark);
+        bone1.position.y = -0.72;
+        g.add(bone1);
+        for (let k = -1; k <= 1; k++) {
+          const claw = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.24, 4), bone);
+          claw.position.set(k * 0.045, -1.55, 0.02);
+          claw.rotation.x = Math.PI;
+          g.add(claw);
+        }
+        g.rotation.z = side * 0.08;
+        return g;
+      };
+      this.armL = arm(-1);
+      this.armR = arm(1);
+      // рваная накидка
+      for (let k = 0; k < 6; k++) {
+        const rag = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9 + (k % 3) * 0.2, 3), dark);
+        const a = (k / 6) * Math.PI * 2;
+        rag.position.set(Math.cos(a) * 0.17, 1.55, Math.sin(a) * 0.14);
+        rag.rotation.x = Math.PI;
+        rag.rotation.y = a;
+        this.group.add(rag);
+      }
+      this.head = new THREE.Group();
+      this.head.position.y = 2.42;
+      const mask = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), bone);
+      mask.scale.set(0.85, 1.3, 0.55);
+      const black = new THREE.MeshBasicMaterial({ color: 0x050405 });
+      const red = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+      for (const side of [-1, 1]) {
+        const socket = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), black);
+        socket.scale.set(1, 1.5, 0.6);
+        socket.position.set(side * 0.075, 0.05, 0.1);
+        const glow = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 5), red);
+        glow.position.set(side * 0.075, 0.035, 0.13);
+        this.head.add(socket, glow);
+        // рог: ствол и два отростка
+        const horn = new THREE.Group();
+        horn.position.set(side * 0.1, 0.2, -0.02);
+        const h1 = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.03, 0.5, 4), bark);
+        h1.position.y = 0.22;
+        const h2 = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.018, 0.26, 4), bark);
+        h2.position.set(side * 0.08, 0.36, 0);
+        h2.rotation.z = -side * 0.9;
+        const h3 = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.016, 0.2, 4), bark);
+        h3.position.set(-side * 0.05, 0.2, 0.03);
+        h3.rotation.z = side * 0.8;
+        horn.add(h1, h2, h3);
+        horn.rotation.z = -side * 0.42;
+        this.head.add(horn);
+      }
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.15, 0.02), black);
+      mouth.position.set(0, -0.13, 0.11);
+      this.head.add(mask, mouth);
+      this.group.add(this.body, this.legL, this.legR, this.armL, this.armR, this.head);
+      this.radius = 0.95;
+      this.cy = 1.5;
+      this.phase = 0;
+    } else if (type === 2) {
       // Житель деревни: коренастый человечек в широкой соломенной шляпе
       const info = JOBS[job] || JOBS[0];
       const tunic = lam(new THREE.Color(info.color).getHex());
@@ -204,6 +309,23 @@ class MobView {
     let dy = this.yaw - this.group.rotation.y;
     dy = ((dy + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
     this.group.rotation.y += dy * (1 - Math.exp(-dt * 10));
+    if (this.type === 3) {
+      // на бегу тянет руки вперёд, замерев под взглядом — едва заметно подёргивает головой
+      const moving = Math.hypot(this.target.x - p.x, this.target.z - p.z) > 0.08;
+      this.phase += dt * (moving ? 14 : 0);
+      const s = Math.sin(this.phase);
+      const reach = moving ? -1.15 : -0.05;
+      this.armL.rotation.x += (reach + s * 0.25 - this.armL.rotation.x) * Math.min(1, dt * 8);
+      this.armR.rotation.x += (reach - s * 0.25 - this.armR.rotation.x) * Math.min(1, dt * 8);
+      this.legL.rotation.x = moving ? s * 0.7 : 0;
+      this.legR.rotation.x = moving ? -s * 0.7 : 0;
+      this.body.rotation.x = moving ? 0.22 : 0;
+      this.head.rotation.z = moving ? 0 : Math.sin(this.t * 0.7) * 0.22 + (Math.sin(this.t * 23) > 0.96 ? 0.2 : 0);
+      this.head.rotation.x = moving ? 0.25 : 0;
+      this.prevY = p.y;
+      for (const m of this.mats) m.emissive.setHex(this.hurt ? 0xaa1111 : m.userData.em);
+      return;
+    }
     const before = this.type === 2 ? p.clone() : null;
     const vy = (p.y - this.prevY) / Math.max(dt, 1e-3);
     this.prevY = p.y;
@@ -374,7 +496,6 @@ class Hand {
       t = new THREE.CanvasTexture(canvas);
       t.magFilter = THREE.NearestFilter;
       t.minFilter = THREE.NearestFilter;
-      t.colorSpace = THREE.SRGBColorSpace;
       this.texCache.set(canvas, t);
     }
     return t;
@@ -505,6 +626,7 @@ export class Entities {
       p.target.set(s[1], s[2], s[3]);
       p.yaw = s[4];
       p.pitch = s[5];
+      p.setArmor(s[7] | 0);
     }
   }
 

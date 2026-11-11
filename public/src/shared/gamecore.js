@@ -1,7 +1,7 @@
 // Игровое ядро сервера. Не зависит от окружения: на Node работает за WebSocket,
 // а в одиночной игре запускается прямо в браузере (в воркере) с той же логикой.
 import { CHUNK, HEIGHT, SEA, DAY_LENGTH, BUILD_LIMIT } from './constants.js';
-import { B, BLOCKS, I, SOLID, SHAPE, LIQUID, JOBS, validItem } from './blocks.js';
+import { B, BLOCKS, I, SOLID, OPAQUE, EMIT, SHAPE, LIQUID, JOBS, validItem } from './blocks.js';
 import { createWorldGen } from './worldgen.js';
 import { moveBox } from './physics.js';
 
@@ -10,6 +10,7 @@ const MAX_PLAYERS = 32;
 const MOB_FLUFF = 0;
 const MOB_GLOOM = 1;
 const MOB_VILLAGER = 2;
+const MOB_MOROK = 3; // хоррор-монстр: движется, только пока на него не смотрят
 const MOB_CAP = 48;
 const FLOW_MAX = { [B.WATER]: 2, [B.LAVA]: 1 }; // на сколько блоков жидкость растекается в стороны
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -242,6 +243,9 @@ export class GameCore {
       chatBudget: 5,
       hadMobs: false,
       age: 0,
+      ar: 0, // надетая броня (упакованные уровни по слотам) — чтобы её видели другие
+      horror: true, // согласен ли игрок на Морока
+      morokCd: 45, // секунд до возможного появления Морока
     };
     return c;
   }
@@ -282,7 +286,11 @@ export class GameCore {
           c.pos = m.p;
           if (Array.isArray(m.r) && m.r.length === 2 && m.r.every(fin)) c.rot = m.r;
           c.held = m.h | 0;
+          c.ar = (m.a | 0) & 255;
         }
+        break;
+      case 'pref':
+        c.horror = m.horror !== false;
         break;
       case 'cr':
         this.onChunkRequest(c, m);
@@ -606,6 +614,12 @@ export class GameCore {
     mob.flee = 4;
     mob.fleeFrom = c;
     mob.timer = 0.3;
+    if (mob.type === MOB_MOROK) {
+      // раненый Морок на несколько секунд перестаёт замирать под взглядом
+      mob.rage = 3.5;
+      mob.v.x *= 0.4;
+      mob.v.z *= 0.4;
+    }
     this.damageMob(mob, Math.max(1, Math.min(12, Number(m.d) || 1)), c);
   }
 
@@ -618,7 +632,11 @@ export class GameCore {
     this.broadcast({ t: 'md', id: mob.id, k: mob.type, p: [r2(mob.x), r2(mob.y), r2(mob.z)] });
     if (by && by.joined) {
       if (mob.type === MOB_FLUFF) by.send({ t: 'give', id: I.FLUFF, n: 1 + (Math.random() < 0.5 ? 1 : 0) });
-      else by.send({ t: 'give', id: I.SHADOW_DUST, n: 1 + (Math.random() < 0.4 ? 1 : 0) });
+      else if (mob.type === MOB_MOROK) {
+        by.send({ t: 'give', id: I.SHADOW_DUST, n: 4 });
+        by.send({ t: 'give', id: I.CRYSTAL, n: 2 });
+        by.morokCd = 150;
+      } else by.send({ t: 'give', id: I.SHADOW_DUST, n: 1 + (Math.random() < 0.4 ? 1 : 0) });
     }
   }
 
@@ -649,6 +667,174 @@ export class GameCore {
     };
     this.mobs.set(mob.id, mob);
     return mob;
+  }
+
+  // ---------- Морок ----------
+  // Появляется ночью за спиной игрока в режиме выживания, не чаще раза в минуту.
+  spawnMorok(dt) {
+    if (!this.isNight()) return;
+    for (const c of this.clients.values()) {
+      if (!c.joined || c.mode !== 's' || c.hp <= 0 || !c.horror) continue;
+      c.morokCd -= dt;
+      if (c.morokCd > 0 || Math.random() < 0.5) continue;
+      let has = false;
+      for (const mob of this.mobs.values()) if (mob.type === MOB_MOROK && mob.tid === c.id) has = true;
+      if (has) continue;
+      const p = this.spotBehind(c, 24 + Math.random() * 12);
+      if (!p) continue;
+      const mob = this.spawnMob(MOB_MOROK, p[0], p[1], p[2]);
+      mob.hp = 26;
+      mob.tid = c.id;
+      c.morokCd = 60;
+    }
+  }
+
+  // Свободное место на земле позади игрока (вне поля зрения).
+  spotBehind(c, dist) {
+    const ang = c.rot[0] + (Math.random() - 0.5) * 1.6;
+    const x = Math.floor(c.pos[0] + Math.sin(ang) * dist);
+    const z = Math.floor(c.pos[2] + Math.cos(ang) * dist);
+    let y = Math.min(HEIGHT - 5, Math.floor(c.pos[1]) + 12);
+    while (y > 1 && !SOLID[this.getBlock(x, y, z)]) y--;
+    for (let k = 1; k <= 3; k++) {
+      const id = this.getBlock(x, y + k, z);
+      if (SOLID[id] || LIQUID[id]) return null;
+    }
+    return [x + 0.5, y + 1, z + 0.5];
+  }
+
+  // Видит ли игрок моба: в поле зрения и без непрозрачных блоков на пути.
+  sees(c, mob) {
+    const ex = c.pos[0];
+    const ey = c.pos[1] + 1.62;
+    const ez = c.pos[2];
+    const tx = mob.x - ex;
+    const ty = mob.y + 1.7 - ey;
+    const tz = mob.z - ez;
+    const d = Math.hypot(tx, ty, tz);
+    if (d > 56) return false;
+    if (d < 0.5) return true;
+    const cp = Math.cos(c.rot[1]);
+    const fx = -Math.sin(c.rot[0]) * cp;
+    const fy = Math.sin(c.rot[1]);
+    const fz = -Math.cos(c.rot[0]) * cp;
+    if ((tx * fx + ty * fy + tz * fz) / d < 0.5) return false;
+    const steps = Math.ceil(d * 2);
+    for (let i = 1; i < steps; i++) {
+      const k = i / steps;
+      if (OPAQUE[this.getBlock(Math.floor(ex + tx * k), Math.floor(ey + ty * k), Math.floor(ez + tz * k))]) return false;
+    }
+    return true;
+  }
+
+  // Есть ли рядом с точкой яркий источник света (фонарь, лава и т. п.).
+  nearLight(p) {
+    const px = Math.floor(p[0]);
+    const py = Math.floor(p[1]);
+    const pz = Math.floor(p[2]);
+    for (let y = py - 2; y <= py + 4; y++) {
+      for (let z = pz - 5; z <= pz + 5; z++) {
+        for (let x = px - 5; x <= px + 5; x++) {
+          if (y >= 0 && y < HEIGHT && EMIT[this.getBlock(x, y, z)] >= 12) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  vanish(mob) {
+    this.mobs.delete(mob.id);
+    this.broadcast({ t: 'md', id: mob.id, k: MOB_MOROK, p: [r2(mob.x), r2(mob.y), r2(mob.z)] });
+  }
+
+  tickMorok(mob, dt, night) {
+    const t = this.clients.get(mob.tid);
+    if (!t || !t.joined || t.mode !== 's' || t.hp <= 0 || !night || !t.horror) {
+      this.vanish(mob);
+      return;
+    }
+    const dx = t.pos[0] - mob.x;
+    const dy = t.pos[1] - mob.y;
+    const dz = t.pos[2] - mob.z;
+    const dist = Math.hypot(dx, dy, dz);
+    const dh = Math.hypot(dx, dz) || 1;
+    if (dist > 72) {
+      this.vanish(mob);
+      return;
+    }
+    mob.litT = (mob.litT || 0) - dt;
+    if (mob.litT <= 0) {
+      mob.litT = 1;
+      mob.lit = this.nearLight(t.pos);
+    }
+    let seen = false;
+    if ((mob.rage || 0) > 0) mob.rage -= dt;
+    else {
+      for (const c of this.clients.values()) {
+        if (c.joined && this.sees(c, mob)) {
+          seen = true;
+          break;
+        }
+      }
+    }
+    const inWater = LIQUID[this.getBlock(Math.floor(mob.x), Math.floor(mob.y + 0.6), Math.floor(mob.z))] > 0;
+    if (inWater) mob.v.y += (3 - mob.v.y) * Math.min(1, dt * 5);
+    else mob.v.y -= 26 * dt;
+    if (mob.lit && dist < 13) {
+      // свет отпугивает: пятится от освещённого игрока
+      mob.v.x = (-dx / dh) * 4;
+      mob.v.z = (-dz / dh) * 4;
+      mob.hurt = 0;
+    } else if (seen) {
+      mob.v.x = 0;
+      mob.v.z = 0;
+      mob.seen = (mob.seen || 0) + dt;
+      if (mob.seen > 14) {
+        // слишком долго разглядывали — исчезает и заходит с другой стороны
+        const p = this.spotBehind(t, 18 + Math.random() * 10);
+        if (p) {
+          mob.x = p[0];
+          mob.y = p[1];
+          mob.z = p[2];
+        }
+        mob.seen = 0;
+      }
+    } else {
+      mob.seen = Math.max(0, (mob.seen || 0) - dt * 2);
+      const sp = dist > 10 ? 6.4 : 5.2;
+      mob.v.x = (dx / dh) * sp;
+      mob.v.z = (dz / dh) * sp;
+    }
+    mob.yaw = Math.atan2(dx, dz);
+    mob.job = seen ? 1 : 0; // для клиента: 1 — замер под взглядом
+    const res = this.res;
+    moveBox(this.isSolid, mob, mob.v, 0.3, 2.6, dt, res);
+    // карабкается по любым стенам и кронам
+    if (res.hitX || res.hitZ) mob.v.y = 6.5;
+    // если так и не смог приблизиться (навес, яма) — исчезает и появляется ближе
+    if (!seen && !mob.lit) {
+      mob.stuckT = (mob.stuckT || 0) + dt;
+      if (mob.stuckT > 3) {
+        if (dist > (mob.stuckD || 999) - 1.5) {
+          const p = this.spotBehind(t, 10 + Math.random() * 8);
+          if (p) {
+            mob.x = p[0];
+            mob.y = p[1];
+            mob.z = p[2];
+          }
+        }
+        mob.stuckT = 0;
+        mob.stuckD = dist;
+      }
+    } else {
+      mob.stuckT = 0;
+      mob.stuckD = dist;
+    }
+    if (!mob.lit && dist < 1.9 && Math.abs(dy) < 2.4) {
+      t.send({ t: 'hurt', d: 8, p: [r2(mob.x), r2(mob.y), r2(mob.z)], k: 'morok' });
+      t.morokCd = 55;
+      this.vanish(mob);
+    }
   }
 
   // Заселяет деревни рядом с игроками.
@@ -685,7 +871,7 @@ export class GameCore {
       const dz = mob.z - c.pos[2];
       if (dx * dx + dz * dz < 56 * 56) {
         if (mob.type === MOB_FLUFF) fluffs++;
-        else glooms++;
+        else if (mob.type === MOB_GLOOM) glooms++;
       }
     }
     const ang = Math.random() * Math.PI * 2;
@@ -729,7 +915,9 @@ export class GameCore {
         this.mobs.delete(mob.id);
         continue;
       }
-      if (mob.type === MOB_VILLAGER) {
+      if (mob.type === MOB_MOROK) {
+        this.tickMorok(mob, dt, night);
+      } else if (mob.type === MOB_VILLAGER) {
         const inWater = LIQUID[this.getBlock(Math.floor(mob.x), Math.floor(mob.y + 0.4), Math.floor(mob.z))] > 0;
         if (inWater) mob.v.y += (2.6 - mob.v.y) * Math.min(1, dt * 5);
         else mob.v.y -= 24 * dt;
@@ -885,6 +1073,7 @@ export class GameCore {
     if (this.tVillagers >= 2) {
       this.tVillagers = 0;
       this.spawnVillagers();
+      this.spawnMorok(2);
     }
     this.tickMobs(dt);
 
@@ -895,7 +1084,7 @@ export class GameCore {
       c.age += dt;
       c.budget = Math.min(90, c.budget + 45 * dt);
       c.chatBudget = Math.min(5, c.chatBudget + dt);
-      pl.push([c.id, r2(c.pos[0]), r2(c.pos[1]), r2(c.pos[2]), r2(c.rot[0]), r2(c.rot[1]), c.held]);
+      pl.push([c.id, r2(c.pos[0]), r2(c.pos[1]), r2(c.pos[2]), r2(c.rot[0]), r2(c.rot[1]), c.held, c.ar]);
     }
     for (const c of this.clients.values()) {
       if (!c.joined) continue;

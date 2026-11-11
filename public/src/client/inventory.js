@@ -1,12 +1,14 @@
 // Инвентарь игрока: 9 слотов панели быстрого доступа + 27 слотов рюкзака.
-import { maxStack, validItem } from '../shared/blocks.js';
+import { ITEMS, maxStack, validItem } from '../shared/blocks.js';
 
 export const HOTBAR = 9;
 export const SLOTS = 36;
+export const ARMOR = 4; // слоты 36..39: шлем, нагрудник, поножи, ботинки
+export const TOTAL = SLOTS + ARMOR;
 
 export class Inventory {
   constructor() {
-    this.slots = new Array(SLOTS).fill(null);
+    this.slots = new Array(TOTAL).fill(null);
     this.sel = 0;
     this.onChange = null;
   }
@@ -24,16 +26,59 @@ export class Inventory {
     return s ? s.id : 0;
   }
 
+  // Считает предметы в рюкзаке и на панели (надетая броня не в счёт).
   count(id) {
     let n = 0;
-    for (const s of this.slots) if (s && s.id === id) n += s.n;
+    for (let i = 0; i < SLOTS; i++) {
+      const s = this.slots[i];
+      if (s && s.id === id) n += s.n;
+    }
     return n;
+  }
+
+  // Сумма очков защиты надетой брони.
+  armorPoints() {
+    let n = 0;
+    for (let i = SLOTS; i < TOTAL; i++) {
+      const s = this.slots[i];
+      if (s && ITEMS[s.id] && ITEMS[s.id].armor) n += ITEMS[s.id].armor.points;
+    }
+    return n;
+  }
+
+  bootsPoints() {
+    const s = this.slots[SLOTS + 3];
+    return s && ITEMS[s.id] && ITEMS[s.id].armor ? ITEMS[s.id].armor.points : 0;
+  }
+
+  // Упакованные уровни брони по слотам (0 — пусто, 1..3) — для показа другим игрокам.
+  armorCode() {
+    let code = 0;
+    for (let k = 0; k < ARMOR; k++) {
+      const s = this.slots[SLOTS + k];
+      const a = s && ITEMS[s.id] ? ITEMS[s.id].armor : null;
+      if (a) code |= (a.tier + 1) << (k * 2);
+    }
+    return code;
+  }
+
+  // Надевает броню из слота i (меняя местами с уже надетой). Возвращает успех.
+  equipFrom(i) {
+    const s = this.slots[i];
+    const a = s && ITEMS[s.id] ? ITEMS[s.id].armor : null;
+    if (!a) return false;
+    const k = SLOTS + a.slot;
+    this.slots[i] = this.slots[k];
+    this.slots[k] = s;
+    this.changed();
+    return true;
   }
 
   // Добавляет предметы; возвращает, сколько не поместилось.
   add(id, n) {
     const max = maxStack(id);
-    for (const s of this.slots) {
+    for (let i = 0; i < SLOTS; i++) {
+      const s = this.slots[i];
       if (n <= 0) break;
       if (s && s.id === id && s.n < max) {
         const k = Math.min(n, max - s.n);
@@ -93,7 +138,7 @@ export class Inventory {
   load(arr) {
     this.slots.fill(null);
     if (Array.isArray(arr)) {
-      for (let i = 0; i < SLOTS && i < arr.length; i++) {
+      for (let i = 0; i < TOTAL && i < arr.length; i++) {
         const s = arr[i];
         if (Array.isArray(s) && validItem(s[0]) && s[1] > 0) this.slots[i] = { id: s[0], n: Math.min(s[1], maxStack(s[0])) };
       }

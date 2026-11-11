@@ -74,11 +74,16 @@ export class Player {
     this.hook = null;
   }
 
-  damage(d, from) {
+  // kind: 'mob' | 'boom' | 'fall' | 'lava' | 'void' — от этого зависит, помогает ли броня.
+  damage(d, from, kind = 'mob') {
     if (this.mode !== 's' || this.dead || d <= 0) return;
     const g0 = this.game;
     if (from && g0.elapsed - this.lastHurt < 0.8) return; // краткая неуязвимость после удара
     this.lastHurt = g0.elapsed;
+    // броня снимает 4% урона от мобов и взрывов за очко, ботинки смягчают падение
+    if (kind === 'mob' || kind === 'boom') d *= 1 - Math.min(0.8, g0.inv.armorPoints() * 0.04);
+    else if (kind === 'fall') d *= 1 - Math.min(0.6, g0.inv.bootsPoints() * 0.15);
+    d = Math.max(0.5, Math.round(d * 2) / 2);
     this.hp = Math.max(0, this.hp - d);
     this.dirty = true;
     this.regenT = 0;
@@ -129,7 +134,7 @@ export class Player {
       this.lavaT -= dt;
       if (this.lavaT <= 0) {
         this.lavaT = 0.5;
-        this.damage(4, null);
+        this.damage(4, null, 'lava');
       }
     } else this.lavaT = 0;
 
@@ -214,7 +219,7 @@ export class Player {
         g.sound.play('boing');
       } else if (!wasGround) {
         const dist = this.fallTop - p.y;
-        if (dist > 3.6 && !this.inWater) this.damage(Math.floor(dist - 3), null);
+        if (dist > 3.6 && !this.inWater) this.damage(Math.floor(dist - 3), null, 'fall');
         if (dist > 0.6) g.sound.play('step', 0.9);
       }
       this.fallTop = p.y;
@@ -252,7 +257,7 @@ export class Player {
     }
 
     if (p.y < -24) {
-      this.damage(6, null);
+      this.damage(6, null, 'void');
       if (!this.dead) this.teleport(this.spawn);
     }
 
@@ -409,6 +414,16 @@ export class Player {
     if (villager && villager.type === 2) {
       this.trade(villager);
       hand.doSwing();
+      return;
+    }
+    if (held && ITEMS[held.id] && ITEMS[held.id].armor) {
+      // броню в руке можно надеть одним нажатием
+      if (g.inv.equipFrom(g.inv.sel)) {
+        g.sound.play('craft');
+        g.ui.toast('Надето: ' + itemName(held.id));
+        hand.doSwing();
+        this.dirty = true;
+      }
       return;
     }
     if (held && (held.id === I.BUCKET || held.id === I.BUCKET_WATER || held.id === I.BUCKET_LAVA)) {

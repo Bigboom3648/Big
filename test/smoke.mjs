@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { createWorldGen } from '../public/src/shared/worldgen.js';
-import { B, RECIPES, BLOCKS, JOBS, validItem } from '../public/src/shared/blocks.js';
+import { B, RECIPES, BLOCKS, ITEMS, JOBS, armorId, validItem } from '../public/src/shared/blocks.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kubozemye-'));
@@ -48,6 +48,7 @@ console.log('Генерация мира');
   ok(a.every((v) => v === 0 || BLOCKS[v]), 'в чанке только известные блоки');
   ok(RECIPES.every((r) => validItem(r.out[0]) && r.ins.every(([id]) => validItem(id))), 'рецепты ссылаются на существующие предметы');
   ok(JOBS.every((j) => validItem(j.give[0]) && validItem(j.get[0])), 'сделки жителей ссылаются на существующие предметы');
+  ok([0, 1, 2].every((t) => [0, 1, 2, 3].every((s) => ITEMS[armorId(t, s)].armor.slot === s && RECIPES.some((r) => r.out[0] === armorId(t, s)))), 'у каждой части брони есть слот и рецепт');
   const g1 = createWorldGen(42);
   const v1 = g1.villages.nearest(0, 0, 2);
   const v2 = createWorldGen(42).villages.nearest(0, 0, 2);
@@ -112,6 +113,9 @@ try {
   b.send({ t: 'chat', m: 'привет' });
   ok(!!(await a.wait((m) => m.t === 'chat' && m.m === 'привет' && m.id === wb.id)), 'чат работает');
   ok(!!(await a.wait((m) => m.t === 'pp' && m.l.length === 2)), 'рассылаются позиции игроков');
+  b.send({ t: 'pos', p: wa.spawn, r: [0, 0], h: 0, a: 171 });
+  ok(!!(await a.wait((m) => m.t === 'pp' && m.l.some((e) => e[0] === wb.id && e[7] === 171))), 'надетая броня видна другим игрокам');
+  a.send({ t: 'pref', horror: false });
 
   // бочка: поджиг -> взрыв -> пакет изменений
   a.send({ t: 'set', x: sx + 3, y: sy + 1, z: sz + 3, id: B.BARREL });

@@ -22,11 +22,14 @@
       <input id="chatinput" class="hidden" maxlength="200" autocomplete="off" placeholder="Сообщение или /команда (Enter — отправить)" />
       <div id="toast"></div>
       <div id="bottom">
+        <div id="armorhud" class="hidden"></div>
         <div id="hp"><i></i><span></span></div>
         <div id="hotbar"></div>
       </div>
       <div id="players" class="hidden"></div>
       <div id="clickhint" class="hidden">Нажмите, чтобы продолжить</div>
+      <div id="dread"></div>
+      <div id="scare" class="hidden"></div>
       <div id="touch">
         <div id="joy"><div id="joyknob"></div></div>
         <div class="tbtn" id="tJump" data-act="jump">▲</div>
@@ -49,6 +52,10 @@
           <div id="side"></div>
         </div>
         <div class="col">
+          <div class="armorrow">
+            <div id="armor"></div>
+            <div id="armorinfo"></div>
+          </div>
           <h2>Рюкзак</h2>
           <div id="bag" class="grid"></div>
           <div id="bar" class="grid"></div>
@@ -69,6 +76,8 @@
         <label>Поле зрения: <b id="vFov"></b><input id="sFov" type="range" min="60" max="100" step="1" /></label>
         <label>Чувствительность мыши: <b id="vSens"></b><input id="sSens" type="range" min="1" max="10" step="1" /></label>
         <label>Громкость: <b id="vVol"></b><input id="sVol" type="range" min="0" max="10" step="1" /></label>
+        <label class="check"><input id="cShaders" type="checkbox" /> Шейдеры: свет солнца, блики на воде, свечение, лучи (клавиша G)</label>
+        <label class="check"><input id="cHorror" type="checkbox" /> Хоррор-монстр Морок по ночам (в выживании)</label>
         <label class="check"><input id="cJump" type="checkbox" /> Автопрыжок на уступы</label>
         <details>
           <summary>Управление</summary>
@@ -77,7 +86,7 @@
             <b>C</b><span>красться / вниз в полёте</span> <b>ЛКМ</b><span>ломать, бить</span> <b>ПКМ</b><span>ставить, использовать</span>
             <b>СКМ</b><span>взять блок (творчество)</span> <b>1–9, колесо</b><span>выбор слота</span> <b>E</b><span>рюкзак и крафт</span>
             <b>F / двойной пробел</b><span>полёт (творчество)</span> <b>T, /</b><span>чат и команды</span> <b>Tab</b><span>список игроков</span>
-            <b>M</b><span>миникарта</span> <b>F3</b><span>отладка</span>
+            <b>M</b><span>миникарта</span> <b>G</b><span>шейдеры вкл/выкл</span> <b>F3</b><span>отладка</span>
           </div>
         </details>
       </div>

@@ -312,7 +312,7 @@ export function createEngine(post) {
                 b.light[li] = s;
                 b.light[li + 1] = bl;
                 b.light[li + 2] = 235;
-                b.light[li + 3] = 0;
+                b.light[li + 3] = py[k] ? 64 : 0; // верх растения качается на ветру
                 b.nv++;
               }
               b.idx[b.ni++] = v0;
@@ -327,7 +327,8 @@ export function createEngine(post) {
           const opaque = OPAQUE[id];
           const cull = CULLSAME[id];
           const liquid = LIQUID[id];
-          const flag = liquid === 1 ? 255 : liquid === 2 ? 128 : 0; // для анимации в шейдере
+          // метка для шейдера: 255 вода, 128 лава, 96 листва
+          const flag = liquid === 1 ? 255 : liquid === 2 ? 128 : RENDER[id] === 1 && !cull ? 96 : 0;
           const b = RENDER[id] === 2 ? bufT : bufO;
           const lowTop = liquid !== 0 && rb[i + SY] !== id;
           for (let f = 0; f < 6; f++) {

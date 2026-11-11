@@ -30,6 +30,7 @@ export const I = {
   BUCKET: 290,
   BUCKET_WATER: 291,
   BUCKET_LAVA: 292,
+  ARMOR: 300, // 300 + уровень * 4 + слот (см. armorId)
 };
 
 // ---------- Тайлы текстур ----------
@@ -213,6 +214,39 @@ item(I.BUCKET, 'bucket', 'Ведро', { stack: 16 });
 item(I.BUCKET_WATER, 'bucket_water', 'Ведро воды', { stack: 1 });
 item(I.BUCKET_LAVA, 'bucket_lava', 'Ведро лавы', { stack: 1 });
 
+// Броня: 3 уровня x 4 слота. Каждое очко защиты снимает 4% урона от мобов и взрывов.
+export const ARMOR_SLOTS = ['Шлем', 'Нагрудник', 'Поножи', 'Ботинки'];
+export const ARMOR_TIERS = ['quilt', 'copper', 'crystal'];
+export const armorId = (tier, slot) => I.ARMOR + tier * 4 + slot;
+{
+  const names = [
+    ['Стёганый шлем', 'Стёганый нагрудник', 'Стёганые поножи', 'Стёганые ботинки'],
+    ['Медный шлем', 'Медный нагрудник', 'Медные поножи', 'Медные ботинки'],
+    ['Кристальный шлем', 'Кристальный нагрудник', 'Кристальные поножи', 'Кристальные ботинки'],
+  ];
+  const points = [
+    [1, 2, 2, 1],
+    [2, 4, 3, 2],
+    [3, 6, 5, 3],
+  ];
+  const keys = ['helmet', 'chest', 'legs', 'boots'];
+  for (let t = 0; t < 3; t++) {
+    for (let s = 0; s < 4; s++) {
+      const id = armorId(t, s);
+      ITEMS[id] = {
+        id,
+        key: keys[s] + '_' + ARMOR_TIERS[t],
+        name: names[t][s],
+        stack: 1,
+        tool: null,
+        dmg: 1,
+        food: 0,
+        armor: { slot: s, tier: t, points: points[t][s] },
+      };
+    }
+  }
+}
+
 export const TIER_NAMES = ['', 'wood', 'stone', 'copper', 'crystal'];
 const TIER_RU_F = ['', 'Деревянная', 'Каменная', 'Медная', 'Кристальная'];
 const TIER_RU_M = ['', 'Деревянный', 'Каменный', 'Медный', 'Кристальный'];
@@ -290,6 +324,16 @@ recipe(B.TRAMPOLINE, 1, [I.FLUFF, 3], [B.PLANKS, 2]);
 recipe(I.GLIDER, 1, [I.FLUFF, 6], [I.STICK, 4]);
 recipe(I.HOOK, 1, [I.COPPER_INGOT, 3], [I.STICK, 2], [I.FLUFF, 2]);
 recipe(I.BUCKET, 1, [I.COPPER_INGOT, 3]);
+{
+  // стёганая броня — из пуха, медная — из слитков, кристальная — из кристаллов
+  const mats = [I.FLUFF, I.COPPER_INGOT, I.CRYSTAL];
+  const cost = [
+    [2, 4, 3, 2],
+    [4, 7, 6, 3],
+    [3, 6, 5, 3],
+  ];
+  for (let t = 0; t < 3; t++) for (let s = 0; s < 4; s++) recipe(armorId(t, s), 1, [mats[t], cost[t][s]]);
+}
 recipe(B.BARREL, 1, [B.PLANKS, 4], [I.COAL, 2], [I.SHADOW_DUST, 1]);
 recipe(B.PAD, 2, [I.CRYSTAL, 2], [I.SHADOW_DUST, 2], [B.COBBLE, 4]);
 recipe(B.COPPER_BLOCK, 1, [I.COPPER_INGOT, 4]);
@@ -315,6 +359,9 @@ export const CREATIVE_ITEMS = [
   B.FLOWER_RED, B.FLOWER_YELLOW, B.TALLGRASS, B.GLOWSHROOM, B.BERRY_BUSH, B.DRYBUSH,
   B.BASALT, B.CRATE, B.TRAMPOLINE, B.BARREL, B.PAD, I.HOOK, I.GLIDER, I.BUCKET, I.BUCKET_WATER, I.BUCKET_LAVA,
   I.PICK_CRYSTAL, I.AXE_CRYSTAL, I.SHOVEL_CRYSTAL, I.SWORD_CRYSTAL, I.BERRIES,
+  armorId(0, 0), armorId(0, 1), armorId(0, 2), armorId(0, 3),
+  armorId(1, 0), armorId(1, 1), armorId(1, 2), armorId(1, 3),
+  armorId(2, 0), armorId(2, 1), armorId(2, 2), armorId(2, 3),
 ];
 
 // Что лежит в ящиках с припасами (выпадают две случайные позиции).

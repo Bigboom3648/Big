@@ -822,3 +822,73 @@ body.touch .inv .hint {
     margin: 8px 0 10px;
   }
 }
+
+/* ---------- броня ---------- */
+.armorrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+#armor {
+  display: flex;
+  gap: 5px;
+}
+#armor .slot {
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.28);
+  border: 2px dashed rgba(255, 255, 255, 0.16);
+}
+#armor .slot.full {
+  border-style: solid;
+  border-color: rgba(56, 217, 224, 0.5);
+}
+#armorinfo {
+  font-size: 13px;
+  color: var(--dim);
+  line-height: 1.35;
+}
+#armorinfo b {
+  color: var(--accent2);
+}
+#armorhud {
+  align-self: flex-start;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: rgba(10, 14, 24, 0.7);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--accent2);
+}
+
+/* ---------- Морок ---------- */
+#dread {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0.94) 100%);
+  transition: opacity 0.4s;
+}
+#scare {
+  position: absolute;
+  inset: 0;
+  background: #050305 center / contain no-repeat;
+  animation: scare 0.5s ease-out forwards;
+}
+@keyframes scare {
+  0% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  70% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+  }
+}
