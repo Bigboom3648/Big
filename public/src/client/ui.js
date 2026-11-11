@@ -145,14 +145,16 @@ export class UI {
     t.className = kind;
     clearTimeout(this.flashTimer);
     this.flashTimer = setTimeout(() => {
-      t.className = this.game.player.headInWater ? 'water' : '';
+      t.className = ['', 'water', 'lava'][this.game.player.headFluid];
     }, 180);
   }
 
-  setWater(on) {
+  // kind: 0 — ничего, 1 — голова в воде, 2 — в лаве
+  setFluid(kind) {
     const t = this.el.tint;
     if (t.className === 'hurt') return;
-    t.className = on ? 'water' : '';
+    const cls = ['', 'water', 'lava'][kind];
+    if (t.className !== cls) t.className = cls;
   }
 
   toggleDebug() {

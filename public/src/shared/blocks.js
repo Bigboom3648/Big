@@ -27,6 +27,9 @@ export const I = {
   SWORD_STONE: 283,
   SWORD_COPPER: 284,
   SWORD_CRYSTAL: 285,
+  BUCKET: 290,
+  BUCKET_WATER: 291,
+  BUCKET_LAVA: 292,
 };
 
 // ---------- Тайлы текстур ----------
@@ -53,6 +56,8 @@ export const LOPAC = new Uint8Array(256); // доп. поглощение све
 export const SHAPE = new Uint8Array(256); // 0 куб, 1 крест (растение)
 export const RENDER = new Uint8Array(256); // 0 сплошной, 1 вырезной, 2 полупрозрачный
 export const CULLSAME = new Uint8Array(256); // не рисовать грани между одинаковыми блоками
+export const LIQUID = new Uint8Array(256); // 0 не жидкость, 1 вода, 2 лава
+export const SKYLIT = new Uint8Array(256); // пропускает рассеянный свет неба (небесные острова)
 export const TILE = new Uint16Array(256 * 3); // тайлы: верх, бок, низ
 
 function block(id, key, name, o = {}) {
@@ -75,6 +80,7 @@ function block(id, key, name, o = {}) {
     cullSame: !!o.cullSame,
     replaceable: !!o.replaceable,
     needsGround: !!o.needsGround,
+    liquid: o.liquid || 0,
   };
   BLOCKS[id] = def;
   B[key.toUpperCase()] = id;
@@ -85,6 +91,8 @@ function block(id, key, name, o = {}) {
   SHAPE[id] = def.shape === 'cross' ? 1 : 0;
   RENDER[id] = def.render === 'cutout' ? 1 : def.render === 'blend' ? 2 : 0;
   CULLSAME[id] = def.cullSame ? 1 : 0;
+  LIQUID[id] = def.liquid;
+  SKYLIT[id] = o.skylit ? 1 : 0;
   TILE[id * 3] = tiles[0];
   TILE[id * 3 + 1] = tiles[1];
   TILE[id * 3 + 2] = tiles[2];
@@ -113,6 +121,7 @@ block(5, 'water', 'Вода', {
   cullSame: true,
   replaceable: true,
   drop: null,
+  liquid: 1,
 });
 block(6, 'log', 'Бревно', { tiles: ['log_top', 'log_side', 'log_top'], hard: 2, tool: 'axe' });
 block(7, 'leaves', 'Листва', { opaque: false, render: 'cutout', lopac: 1, hard: 0.3 });
@@ -121,7 +130,7 @@ block(9, 'cobble', 'Булыжник', { hard: 4, tool: 'pick', tier: 1 });
 block(10, 'glass', 'Стекло', { opaque: false, render: 'cutout', hard: 0.4, cullSame: true });
 block(11, 'coal_ore', 'Угольная руда', { hard: 5, tool: 'pick', tier: 1, drop: [I.COAL, 1] });
 block(12, 'copper_ore', 'Медная руда', { hard: 5, tool: 'pick', tier: 2 });
-block(13, 'crystal_ore', 'Кристальная жила', { hard: 6, tool: 'pick', tier: 3, drop: [I.CRYSTAL, 1], light: 4 });
+block(13, 'crystal_ore', 'Кристальная жила', { hard: 6, tool: 'pick', tier: 3, drop: [I.CRYSTAL, 1], light: 4, skylit: true });
 block(14, 'snow', 'Снег', { hard: 0.4, tool: 'shovel' });
 block(15, 'ice', 'Лёд', { opaque: false, render: 'blend', lopac: 1, hard: 0.7, tool: 'pick', cullSame: true });
 block(16, 'brick', 'Кирпич', { hard: 4, tool: 'pick', tier: 1 });
@@ -148,13 +157,26 @@ block(31, 'skymoss', 'Небесный мох', {
   tiles: ['skymoss_top', 'skymoss_side', 'skystone'],
   hard: 0.8,
   tool: 'shovel',
+  skylit: true,
 });
-block(32, 'skystone', 'Небесный камень', { hard: 3, tool: 'pick', tier: 1 });
+block(32, 'skystone', 'Небесный камень', { hard: 3, tool: 'pick', tier: 1, skylit: true });
 block(33, 'copper_block', 'Медный блок', { hard: 5, tool: 'pick', tier: 1 });
 block(34, 'crystal_block', 'Кристальный блок', { hard: 5, tool: 'pick', tier: 1, light: 12 });
 block(35, 'gravel', 'Гравий', { hard: 0.7, tool: 'shovel' });
 block(36, 'drybush', 'Сухой куст', plant({ drop: [I.STICK, 1] }));
 block(37, 'stone_bricks', 'Каменный кирпич', { hard: 4, tool: 'pick', tier: 1 });
+block(38, 'lava', 'Лава', {
+  solid: false,
+  opaque: false,
+  light: 15,
+  lopac: 3,
+  hard: -1,
+  cullSame: true,
+  replaceable: true,
+  drop: null,
+  liquid: 2,
+});
+block(39, 'basalt', 'Базальт', { hard: 5, tool: 'pick', tier: 1 });
 
 export const PAINTS = [
   ['white', 'Белый блок', 0xf2f2ee],
@@ -168,6 +190,8 @@ export const PAINTS = [
   ['black', 'Чёрный блок', 0x2a2a30],
 ];
 PAINTS.forEach(([key, name], i) => block(40 + i, 'paint_' + key, name, { hard: 1.2, tool: 'pick' }));
+// Ящик: при разрушении даёт случайные припасы (см. CRATE_LOOT).
+block(49, 'crate', 'Ящик с припасами', { tiles: ['crate_top', 'crate_side', 'crate_top'], hard: 1.2, tool: 'axe', drop: null });
 
 export const TILE_COUNT = TILES.length;
 
@@ -185,6 +209,9 @@ item(I.SHADOW_DUST, 'shadow_dust', 'Теневая пыль');
 item(I.BERRIES, 'berries', 'Ягоды', { food: 4 });
 item(I.HOOK, 'hook', 'Крюк-кошка', { stack: 1 });
 item(I.GLIDER, 'glider', 'Планер', { stack: 1 });
+item(I.BUCKET, 'bucket', 'Ведро', { stack: 16 });
+item(I.BUCKET_WATER, 'bucket_water', 'Ведро воды', { stack: 1 });
+item(I.BUCKET_LAVA, 'bucket_lava', 'Ведро лавы', { stack: 1 });
 
 export const TIER_NAMES = ['', 'wood', 'stone', 'copper', 'crystal'];
 const TIER_RU_F = ['', 'Деревянная', 'Каменная', 'Медная', 'Кристальная'];
@@ -262,6 +289,7 @@ recipe(B.SANDSTONE, 2, [B.SAND, 4]);
 recipe(B.TRAMPOLINE, 1, [I.FLUFF, 3], [B.PLANKS, 2]);
 recipe(I.GLIDER, 1, [I.FLUFF, 6], [I.STICK, 4]);
 recipe(I.HOOK, 1, [I.COPPER_INGOT, 3], [I.STICK, 2], [I.FLUFF, 2]);
+recipe(I.BUCKET, 1, [I.COPPER_INGOT, 3]);
 recipe(B.BARREL, 1, [B.PLANKS, 4], [I.COAL, 2], [I.SHADOW_DUST, 1]);
 recipe(B.PAD, 2, [I.CRYSTAL, 2], [I.SHADOW_DUST, 2], [B.COBBLE, 4]);
 recipe(B.COPPER_BLOCK, 1, [I.COPPER_INGOT, 4]);
@@ -285,6 +313,28 @@ export const CREATIVE_ITEMS = [
   B.PAINT_WHITE, B.PAINT_RED, B.PAINT_ORANGE, B.PAINT_YELLOW, B.PAINT_GREEN, B.PAINT_CYAN, B.PAINT_BLUE,
   B.PAINT_PURPLE, B.PAINT_BLACK,
   B.FLOWER_RED, B.FLOWER_YELLOW, B.TALLGRASS, B.GLOWSHROOM, B.BERRY_BUSH, B.DRYBUSH,
-  B.TRAMPOLINE, B.BARREL, B.PAD, I.HOOK, I.GLIDER,
+  B.BASALT, B.CRATE, B.TRAMPOLINE, B.BARREL, B.PAD, I.HOOK, I.GLIDER, I.BUCKET, I.BUCKET_WATER, I.BUCKET_LAVA,
   I.PICK_CRYSTAL, I.AXE_CRYSTAL, I.SHOVEL_CRYSTAL, I.SWORD_CRYSTAL, I.BERRIES,
+];
+
+// Что лежит в ящиках с припасами (выпадают две случайные позиции).
+export const CRATE_LOOT = [
+  [I.COAL, 4],
+  [I.COPPER_INGOT, 2],
+  [I.BERRIES, 5],
+  [I.CRYSTAL, 1],
+  [I.FLUFF, 3],
+  [I.STICK, 6],
+  [B.LAMP, 2],
+  [I.SHADOW_DUST, 1],
+  [I.BUCKET, 1],
+];
+
+// Профессии жителей деревень: что житель берёт и что даёт взамен.
+export const JOBS = [
+  { name: 'Кузнец', color: '#ff9d5c', give: [I.COAL, 6], get: [I.COPPER_INGOT, 1] },
+  { name: 'Фермер', color: '#8fd96b', give: [I.BERRIES, 6], get: [I.FLUFF, 2] },
+  { name: 'Алхимик', color: '#b197fc', give: [I.SHADOW_DUST, 3], get: [I.CRYSTAL, 2] },
+  { name: 'Каменщик', color: '#c3cad6', give: [B.COBBLE, 16], get: [B.LAMP, 3] },
+  { name: 'Водонос', color: '#5cc8ff', give: [I.COPPER_INGOT, 2], get: [I.BUCKET, 1] },
 ];

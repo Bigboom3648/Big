@@ -1,8 +1,11 @@
 // Процедурная генерация мира. Чистая функция от зерна: сервер и клиенты
 // получают одинаковый ландшафт, по сети передаются только изменения блоков.
 import { CHUNK, HEIGHT, SEA } from './constants.js';
-import { B } from './blocks.js';
+import { B, SOLID, SHAPE } from './blocks.js';
 import { createNoise, hash2, hash3, rnd2, rnd3 } from './noise.js';
+import { createVillages, STAMP_SET, STAMP_PILLAR, STAMP_PATH } from './villages.js';
+
+const LAVA_LEVEL = 10; // пещеры ниже этой высоты залиты лавой
 
 export const BIOME = { PLAINS: 0, FOREST: 1, DESERT: 2, SNOW: 3, MOUNTAIN: 4 };
 
@@ -119,7 +122,7 @@ export function createWorldGen(seed) {
           else if (y >= h - 3) id = gravel ? B.GRAVEL : filler;
           else if (biome === BIOME.DESERT && y >= h - 7) id = B.SANDSTONE;
           else id = B.STONE;
-          if (id !== B.BEDROCK && isCave(wx, y, wz, h)) id = 0;
+          if (id !== B.BEDROCK && isCave(wx, y, wz, h)) id = y <= LAVA_LEVEL ? B.LAVA : 0;
           data[ci + y * 256] = id;
         }
         for (let y = h + 1; y <= SEA; y++) {
@@ -283,10 +286,41 @@ export function createWorldGen(seed) {
         }
       }
     }
+    // --- деревни ---
+    for (const v of villages.near(x0, z0, x0 + CHUNK - 1, z0 + CHUNK - 1)) {
+      const E = v.E;
+      for (let i = 0; i < E.length; i += 5) {
+        const lx = E[i] - x0;
+        const lz = E[i + 2] - z0;
+        if (lx < 0 || lz < 0 || lx >= CHUNK || lz >= CHUNK) continue;
+        const y = E[i + 1];
+        if (y < 1 || y >= HEIGHT - 2) continue;
+        const di = lx + lz * CHUNK + y * 256;
+        const id = E[i + 3];
+        const mode = E[i + 4];
+        if (mode === STAMP_SET) data[di] = id;
+        else if (mode === STAMP_PILLAR) {
+          for (let k = 0, dj = di; k < 7 && dj >= 256; k++, dj -= 256) {
+            if (SOLID[data[dj]]) break;
+            data[dj] = id;
+          }
+        } else if (mode === STAMP_PATH) {
+          const cur = data[di];
+          if (cur === B.GRASS || cur === B.DIRT || cur === B.SAND || cur === B.SNOW || cur === B.STONE || cur === B.GRAVEL) {
+            data[di] = id;
+            if (SHAPE[data[di + 256]] === 1) data[di + 256] = 0;
+          }
+        }
+      }
+    }
     return data;
   }
 
   // Подходящее место для появления: суша недалеко от начала координат.
+  let spawnCache = null;
+  const getSpawn = () => spawnCache || (spawnCache = findSpawn());
+  const villages = createVillages(seed, column, BIOME, getSpawn);
+
   function findSpawn() {
     for (let r = 0; r < 400; r += 4) {
       for (let a = 0; a < 8; a++) {
@@ -299,5 +333,5 @@ export function createWorldGen(seed) {
     return [0, column(0, 0).h, 0];
   }
 
-  return { seed, column, generateChunk, findSpawn };
+  return { seed, column, generateChunk, findSpawn: getSpawn, villages };
 }

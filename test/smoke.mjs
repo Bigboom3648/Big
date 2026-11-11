@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { createWorldGen } from '../public/src/shared/worldgen.js';
-import { B, RECIPES, BLOCKS, validItem } from '../public/src/shared/blocks.js';
+import { B, RECIPES, BLOCKS, JOBS, validItem } from '../public/src/shared/blocks.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kubozemye-'));
@@ -47,6 +47,18 @@ console.log('Генерация мира');
   ok(a.length === 16 * 16 * 128 && a.every((v, i) => v === b[i]), 'чанк детерминирован по зерну');
   ok(a.every((v) => v === 0 || BLOCKS[v]), 'в чанке только известные блоки');
   ok(RECIPES.every((r) => validItem(r.out[0]) && r.ins.every(([id]) => validItem(id))), 'рецепты ссылаются на существующие предметы');
+  ok(JOBS.every((j) => validItem(j.give[0]) && validItem(j.get[0])), 'сделки жителей ссылаются на существующие предметы');
+  const g1 = createWorldGen(42);
+  const v1 = g1.villages.nearest(0, 0, 2);
+  const v2 = createWorldGen(42).villages.nearest(0, 0, 2);
+  ok(v1 && v2 && v1.village.x === v2.village.x && v1.village.z === v2.village.z && v1.village.houses.length > 0, 'деревни детерминированы по зерну');
+  let planks = 0;
+  for (let cx = v1.village.x0 >> 4; cx <= v1.village.x1 >> 4; cx++) {
+    for (let cz = v1.village.z0 >> 4; cz <= v1.village.z1 >> 4; cz++) {
+      for (const id of g1.generateChunk(cx, cz)) if (id === B.PLANKS || id === B.SANDSTONE) planks++;
+    }
+  }
+  ok(planks > 50, 'в чанках деревни есть постройки');
 }
 
 console.log('Сервер и сеть');
@@ -108,6 +120,23 @@ try {
   ok(!!(await b.wait((m) => m.t === 'b' && m.id === B.BARREL_LIT)), 'бочка поджигается');
   ok(!!(await b.wait((m) => m.t === 'boom', 5000)), 'бочка взрывается');
   ok(!!(await b.wait((m) => m.t === 'bb' && m.l.length >= 4)), 'взрыв меняет блоки пакетом');
+
+  // вёдра: жидкости ставятся только ведром и растекаются
+  a.send({ t: 'set', x: sx + 1, y: sy + 6, z: sz, id: B.LAVA });
+  ok(!!(await a.wait((m) => m.t === 'b' && m.y === sy + 6 && m.id === 0)), 'лаву нельзя поставить как обычный блок');
+  for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) a.send({ t: 'set', x: sx - 8 + dx, y: sy + 5, z: sz + dz, id: B.COBBLE });
+  await sleep(150);
+  a.send({ t: 'bucket', a: 'pour', x: sx - 8, y: sy + 6, z: sz, id: B.WATER });
+  await sleep(900);
+  const wet = new Set();
+  for (const m of b.msgs) if (m.t === 'bb') for (let i = 0; i < m.l.length; i += 4) if (m.l[i + 3] === B.WATER) wet.add(m.l[i] + ',' + m.l[i + 1] + ',' + m.l[i + 2]);
+  ok(wet.size === 13, 'вода из ведра растекается лужей (13 блоков)');
+  a.send({ t: 'bucket', a: 'pour', x: sx - 8, y: sy + 6, z: sz, id: B.LAVA });
+  ok(!!(await b.wait((m) => m.t === 'bb' && m.l[3] === B.BASALT && m.l[0] === sx - 8)), 'лава в воде застывает базальтом');
+  a.send({ t: 'bucket', a: 'fill', x: sx - 7, y: sy + 6, z: sz });
+  ok(!!(await b.wait((m) => m.t === 'bb' && m.l[0] === sx - 7 && m.l[1] === sy + 6 && m.l[3] === 0)), 'пустое ведро зачерпывает воду');
+  a.send({ t: 'chat', m: '/village' });
+  ok(!!(await a.wait((m) => m.t === 'sys' && m.m.includes('деревня'))), 'команда /village находит деревню');
 
   // телепорт-плиты
   a.send({ t: 'set', x: sx - 3, y: sy + 4, z: sz, id: B.PAD });

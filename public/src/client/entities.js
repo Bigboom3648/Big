@@ -1,7 +1,7 @@
 // Существа и эффекты: другие игроки, мобы, частицы, выделение блока,
 // трещины, верёвка крюка и предмет в руке.
 import * as THREE from './three.js';
-import { BLOCKS, ITEMS, isBlock } from '../shared/blocks.js';
+import { BLOCKS, ITEMS, JOBS, isBlock } from '../shared/blocks.js';
 
 const tmpColor = new THREE.Color();
 
@@ -95,9 +95,10 @@ class RemotePlayer {
 const FLUFF_COLORS = [0xffffff, 0xfff1d6, 0xffdfe8, 0xe2f0ff];
 
 class MobView {
-  constructor(id, type, x, y, z) {
+  constructor(id, type, x, y, z, job = 0) {
     this.id = id;
     this.type = type;
+    this.job = job;
     this.group = new THREE.Group();
     this.group.position.set(x, y, z);
     this.target = new THREE.Vector3(x, y, z);
@@ -113,7 +114,43 @@ class MobView {
       this.mats.push(m);
       return m;
     };
-    if (type === 0) {
+    if (type === 2) {
+      // Житель деревни: коренастый человечек в широкой соломенной шляпе
+      const info = JOBS[job] || JOBS[0];
+      const tunic = lam(new THREE.Color(info.color).getHex());
+      const skin = lam(0xf0cfa8);
+      const straw = lam(0xe2c26a);
+      const dark = lam(0x4a3a2c);
+      this.body = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 8), tunic);
+      this.body.scale.set(1, 1.25, 0.9);
+      this.body.position.y = 0.56;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 8), skin);
+      head.position.y = 1.1;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.04, 14), straw);
+      brim.position.y = 1.25;
+      const crown = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.24, 10), straw);
+      crown.position.y = 1.38;
+      const black = new THREE.MeshBasicMaterial({ color: 0x1c1410 });
+      const eye = () => new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 5), black);
+      const eL = eye();
+      const eR = eye();
+      eL.position.set(-0.08, 1.12, 0.19);
+      eR.position.set(0.08, 1.12, 0.19);
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.16), dark);
+      pack.position.set(0, 0.66, -0.32);
+      const foot = () => new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.12, 0.24), dark);
+      this.footL = foot();
+      this.footR = foot();
+      this.footL.position.set(-0.13, 0.06, 0);
+      this.footR.position.set(0.13, 0.06, 0);
+      const tag = nameSprite(info.name, info.color);
+      tag.position.y = 1.85;
+      tag.scale.multiplyScalar(0.85);
+      this.group.add(this.body, head, brim, crown, eL, eR, pack, this.footL, this.footR, tag);
+      this.radius = 0.6;
+      this.cy = 0.75;
+      this.phase = 0;
+    } else if (type === 0) {
       // Пушик: круглый зверёк с длинными ушами
       const fur = lam(FLUFF_COLORS[id % FLUFF_COLORS.length]);
       this.body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.36, 1), fur);
@@ -167,9 +204,18 @@ class MobView {
     let dy = this.yaw - this.group.rotation.y;
     dy = ((dy + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
     this.group.rotation.y += dy * (1 - Math.exp(-dt * 10));
+    const before = this.type === 2 ? p.clone() : null;
     const vy = (p.y - this.prevY) / Math.max(dt, 1e-3);
     this.prevY = p.y;
-    if (this.type === 0) {
+    if (this.type === 2) {
+      // походка вразвалку
+      const sp = Math.hypot(this.target.x - before.x, this.target.z - before.z) > 0.05 ? 1 : 0;
+      this.phase += dt * 9 * sp;
+      const s = Math.sin(this.phase) * sp;
+      this.footL.position.z = s * 0.14;
+      this.footR.position.z = -s * 0.14;
+      this.body.rotation.z = s * 0.07;
+    } else if (this.type === 0) {
       const st = Math.max(-0.2, Math.min(0.28, vy * 0.045));
       this.body.scale.set(1 - st * 0.5, 0.88 + st, 1.08 - st * 0.5);
       const w = Math.sin(this.t * 3) * 0.12 - st * 1.6;
@@ -468,7 +514,7 @@ export class Entities {
     for (const s of list) {
       let m = this.mobs.get(s[0]);
       if (!m) {
-        m = new MobView(s[0], s[1], s[2], s[3], s[4]);
+        m = new MobView(s[0], s[1], s[2], s[3], s[4], s[7] || 0);
         this.mobs.set(s[0], m);
         this.scene.add(m.group);
       }

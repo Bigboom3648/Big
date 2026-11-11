@@ -2,7 +2,7 @@
 // хранение блоков для физики и построение мешей.
 import * as THREE from './three.js';
 import { CHUNK, HEIGHT } from '../shared/constants.js';
-import { B } from '../shared/blocks.js';
+import { B, LIQUID } from '../shared/blocks.js';
 
 const ckey = (cx, cz) => (cx + 0x8000) * 0x10000 + (cz + 0x8000);
 
@@ -329,8 +329,8 @@ export class World {
     return mesh;
   }
 
-  // Луч по вокселям (алгоритм Аманатидеса — Ву).
-  raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  // Луч по вокселям (алгоритм Аманатидеса — Ву). fluids — останавливаться ли на воде и лаве.
+  raycast(ox, oy, oz, dx, dy, dz, maxDist, fluids = false) {
     let x = Math.floor(ox);
     let y = Math.floor(oy);
     let z = Math.floor(oz);
@@ -349,7 +349,7 @@ export class World {
     let t = 0;
     while (t <= maxDist) {
       const id = this.getBlock(x, y, z);
-      if (id !== 0 && id !== B.WATER) return { x, y, z, nx, ny, nz, id, dist: t };
+      if (id !== 0 && (fluids || !LIQUID[id])) return { x, y, z, nx, ny, nz, id, dist: t };
       if (tmx < tmy && tmx < tmz) {
         x += sx;
         t = tmx;

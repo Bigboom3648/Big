@@ -273,8 +273,8 @@ class Game {
     }
     const sprinting = inp.sprint && Math.hypot(p.vel.x, p.vel.z) > 5;
     r.setFov(r.camera.fov + (this.settings.fov + (sprinting || p.gliding || p.hook ? 9 : 0) - r.camera.fov) * Math.min(1, dt * 8));
-    r.underwater = p.headInWater;
-    this.ui.setWater(p.headInWater);
+    r.underwater = p.headFluid;
+    this.ui.setFluid(p.headFluid);
     r.setTime(this.time, this.elapsed);
     this.entities.hand.update(dt, p.walk);
 

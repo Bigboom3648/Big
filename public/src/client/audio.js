@@ -116,6 +116,10 @@ export class Sound {
       case 'boing':
         this.tone(190 * r, 620, 0.24, 'sine', 0.35 * vol);
         break;
+      case 'splash':
+        this.noise(0.28, 900 * r, 0.7, 0.45 * vol, 'lowpass');
+        this.tone(420 * r, 160, 0.16, 'sine', 0.12 * vol);
+        break;
       case 'eat':
         this.noise(0.07, 700, 2, 0.3 * vol);
         this.noise(0.07, 600, 2, 0.3 * vol, 'bandpass', 0.12);

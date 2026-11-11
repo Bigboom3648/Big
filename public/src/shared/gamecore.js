@@ -1,7 +1,7 @@
 // Игровое ядро сервера. Не зависит от окружения: на Node работает за WebSocket,
 // а в одиночной игре запускается прямо в браузере (в воркере) с той же логикой.
 import { CHUNK, HEIGHT, SEA, DAY_LENGTH, BUILD_LIMIT } from './constants.js';
-import { B, BLOCKS, I, SOLID, validItem } from './blocks.js';
+import { B, BLOCKS, I, SOLID, SHAPE, LIQUID, JOBS, validItem } from './blocks.js';
 import { createWorldGen } from './worldgen.js';
 import { moveBox } from './physics.js';
 
@@ -9,7 +9,11 @@ const COLORS = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#38d9a9', '#4dabf7'
 const MAX_PLAYERS = 32;
 const MOB_FLUFF = 0;
 const MOB_GLOOM = 1;
+const MOB_VILLAGER = 2;
 const MOB_CAP = 48;
+const FLOW_MAX = { [B.WATER]: 2, [B.LAVA]: 1 }; // на сколько блоков жидкость растекается в стороны
+const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const DIRS6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 const ckey = (cx, cz) => cx + ',' + cz;
 const r2 = (v) => Math.round(v * 100) / 100;
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -39,6 +43,10 @@ export class GameCore {
     this.mobs = new Map();
     this.nextMob = 1;
     this.fuses = [];
+    this.fronts = []; // фронты растекающихся жидкостей
+    this.tWater = 0;
+    this.tLava = 0;
+    this.tVillagers = 0;
     this.dirty = false;
     this.tSave = 0;
     this.tTime = 0;
@@ -94,27 +102,124 @@ export class GameCore {
     return old;
   }
 
-  // После удаления блока: затекает вода, осыпаются растения без опоры.
-  settle(x, y, z, out) {
+  // ---------- жидкости ----------
+  // Может ли жидкость занять клетку: воздух или растение (его смывает).
+  canFlow(id) {
+    return id === 0 || SHAPE[id] === 1;
+  }
+
+  // Ставит блок жидкости и заводит фронт растекания. origin.left ограничивает объём.
+  placeFluid(x, y, z, id, budget, out, origin) {
+    if (y < 1 || y >= HEIGHT || origin.left <= 0) return;
+    origin.left--;
+    let near = 0;
+    for (const d of DIRS6) {
+      const nx = x + d[0];
+      const ny = y + d[1];
+      const nz = z + d[2];
+      const nb = this.getBlock(nx, ny, nz);
+      if (id === B.LAVA && nb === B.WATER) near = 1;
+      else if (id === B.WATER && nb === B.LAVA) {
+        // вода гасит лаву рядом — получается базальт
+        this.applyBlock(nx, ny, nz, B.BASALT);
+        out.push(nx, ny, nz, B.BASALT);
+      } else if (id === B.LAVA && nb === B.BARREL) this.lightFuse(nx, ny, nz, 1.2);
+    }
+    if (near) {
+      this.applyBlock(x, y, z, B.BASALT);
+      out.push(x, y, z, B.BASALT);
+      return;
+    }
+    this.applyBlock(x, y, z, id);
+    out.push(x, y, z, id);
+    if (this.fronts.length < 4000) this.fronts.push({ x, y, z, id, b: budget, o: origin });
+  }
+
+  // Один шаг растекания для жидкости id: сначала вниз, иначе в стороны.
+  stepFluid(id) {
+    const cur = [];
+    const rest = [];
+    for (const f of this.fronts) (f.id === id ? cur : rest).push(f);
+    if (!cur.length) return;
+    this.fronts = rest;
+    const out = [];
+    for (const f of cur) {
+      if (this.getBlock(f.x, f.y, f.z) !== id) continue;
+      const below = this.getBlock(f.x, f.y - 1, f.z);
+      if (f.y > 1 && this.canFlow(below)) {
+        this.placeFluid(f.x, f.y - 1, f.z, id, FLOW_MAX[id], out, f.o);
+        continue;
+      }
+      if (LIQUID[below]) {
+        if (below !== id) {
+          // вода упала на лаву или лава на воду
+          this.applyBlock(f.x, f.y - 1, f.z, B.BASALT);
+          out.push(f.x, f.y - 1, f.z, B.BASALT);
+        }
+        continue;
+      }
+      if (f.b <= 0) continue;
+      // на уровне моря вода не иссякает
+      const nb = id === B.WATER && f.y <= SEA ? f.b : f.b - 1;
+      for (const d of DIRS4) {
+        const nx = f.x + d[0];
+        const nz = f.z + d[1];
+        if (this.canFlow(this.getBlock(nx, f.y, nz))) this.placeFluid(nx, f.y, nz, id, nb, out, f.o);
+      }
+    }
+    if (out.length) this.broadcast({ t: 'bb', l: out });
+  }
+
+  // После удаления блока: осыпаются растения без опоры, затекает соседняя жидкость.
+  onRemoved(x, y, z, out, origin) {
     if (this.getBlock(x, y, z) !== 0) return;
     const up = this.getBlock(x, y + 1, z);
     if (up && BLOCKS[up].needsGround) {
       this.applyBlock(x, y + 1, z, 0);
       out.push(x, y + 1, z, 0);
     }
-    if (y <= SEA) {
-      const W = B.WATER;
-      if (
-        up === W ||
-        this.getBlock(x + 1, y, z) === W ||
-        this.getBlock(x - 1, y, z) === W ||
-        this.getBlock(x, y, z + 1) === W ||
-        this.getBlock(x, y, z - 1) === W
-      ) {
-        this.applyBlock(x, y, z, W);
-        out.push(x, y, z, W);
+    if (LIQUID[up]) {
+      this.placeFluid(x, y, z, up, FLOW_MAX[up], out, origin);
+      return;
+    }
+    for (const d of DIRS4) {
+      const s = this.getBlock(x + d[0], y, z + d[1]);
+      if (LIQUID[s]) {
+        this.placeFluid(x, y, z, s, s === B.WATER && y <= SEA ? FLOW_MAX[s] : 1, out, origin);
+        return;
       }
     }
+  }
+
+  onBucket(c, m) {
+    const x = m.x | 0;
+    const y = m.y | 0;
+    const z = m.z | 0;
+    if (y < 1 || y > BUILD_LIMIT) return;
+    const dx = x + 0.5 - c.pos[0];
+    const dy = y + 0.5 - c.pos[1];
+    const dz = z + 0.5 - c.pos[2];
+    if (dx * dx + dy * dy + dz * dz > 14 * 14 || c.budget < 1) return;
+    c.budget -= 1;
+    const cur = this.getBlock(x, y, z);
+    const out = [];
+    if (m.a === 'fill') {
+      if (!LIQUID[cur]) return;
+      this.applyBlock(x, y, z, 0);
+      out.push(x, y, z, 0);
+      // море неисчерпаемо; лужи и лаву можно вычерпать до дна
+      if (cur === B.WATER && y <= SEA) this.onRemoved(x, y, z, out, { left: 40 });
+    } else if (m.a === 'pour') {
+      const id = m.id === B.LAVA ? B.LAVA : B.WATER;
+      if (LIQUID[cur] && cur !== id) {
+        // лава в воду или вода в лаву — застывает базальтом
+        this.applyBlock(x, y, z, B.BASALT);
+        out.push(x, y, z, B.BASALT);
+      } else if (this.canFlow(cur)) {
+        this.placeFluid(x, y, z, id, FLOW_MAX[id], out, { left: id === B.WATER ? 60 : 20 });
+      } else return;
+    }
+    if (out.length) this.broadcast({ t: 'bb', l: out });
   }
 
   // ---------- клиенты ----------
@@ -196,6 +301,9 @@ export class GameCore {
         break;
       case 'pad':
         this.onPad(c, m);
+        break;
+      case 'bucket':
+        this.onBucket(c, m);
         break;
       case 'save':
         this.onSave(c, m);
@@ -280,7 +388,7 @@ export class GameCore {
     const id = m.id | 0;
     const reject = () => c.send({ t: 'b', x, y, z, id: y >= 0 && y < HEIGHT ? this.getBlock(x, y, z) : 0 });
     if (y < 1 || y > BUILD_LIMIT) return reject();
-    if (id !== 0 && (!BLOCKS[id] || id === B.BEDROCK || id === B.WATER || id === B.BARREL_LIT)) return reject();
+    if (id !== 0 && (!BLOCKS[id] || id === B.BEDROCK || LIQUID[id] || id === B.BARREL_LIT)) return reject();
     const dx = x + 0.5 - c.pos[0];
     const dy = y + 0.5 - c.pos[1];
     const dz = z + 0.5 - c.pos[2];
@@ -295,7 +403,7 @@ export class GameCore {
     this.broadcast({ t: 'b', x, y, z, id }, c);
     if (id === 0) {
       const extra = [];
-      this.settle(x, y, z, extra);
+      this.onRemoved(x, y, z, extra, { left: 300 });
       if (extra.length) this.broadcast({ t: 'bb', l: extra });
     }
   }
@@ -316,7 +424,7 @@ export class GameCore {
     switch (cmd) {
       case 'help':
       case 'помощь':
-        this.sys('Команды: /list, /seed, /spawn, /sethome, /home, /tp <игрок> или /tp x y z, /time day|night|noon, /mode s|c', c);
+        this.sys('Команды: /list, /seed, /spawn, /village, /sethome, /home, /tp <игрок> или /tp x y z, /time day|night|noon, /mode s|c', c);
         break;
       case 'list':
         this.sys('Онлайн: ' + [...this.clients.values()].map((o) => o.name).join(', '), c);
@@ -327,6 +435,13 @@ export class GameCore {
       case 'spawn':
         tp(this.spawn);
         break;
+      case 'village':
+      case 'деревня': {
+        const r = this.gen.villages.nearest(c.pos[0], c.pos[2], 3);
+        if (!r) this.sys('Поблизости деревень нет — поищите подальше.', c);
+        else this.sys(`Ближайшая деревня: x ${r.village.x}, z ${r.village.z} (${Math.round(r.dist)} блоков). Телепорт: /tp ${r.village.x} ${r.village.y + 14} ${r.village.z}`, c);
+        break;
+      }
       case 'sethome':
         c.home = c.pos.map(r2);
         this.persistPlayer(c);
@@ -420,7 +535,7 @@ export class GameCore {
           const bz = z + dz;
           if (by < 1 || by >= HEIGHT) continue;
           const id = this.getBlock(bx, by, bz);
-          if (id === 0 || id === B.WATER || id === B.BARREL_LIT) continue;
+          if (id === 0 || LIQUID[id] || id === B.BARREL_LIT) continue;
           if (id === B.BARREL) {
             lit.push([bx, by, bz]);
             continue;
@@ -434,13 +549,10 @@ export class GameCore {
         }
       }
     }
-    // вода и растения вокруг воронки (несколько проходов для затекания)
+    // растения без опоры осыпаются, соседние жидкости начинают затекать в воронку
     const n0 = ch.length;
-    for (let pass = 0; pass < 4; pass++) {
-      const before = ch.length;
-      for (let i = 0; i < n0; i += 4) this.settle(ch[i], ch[i + 1], ch[i + 2], ch);
-      if (ch.length === before) break;
-    }
+    const origin = { left: 500 };
+    for (let i = 0; i < n0; i += 4) this.onRemoved(ch[i], ch[i + 1], ch[i + 2], ch, origin);
     this.broadcast({ t: 'bb', l: ch });
     this.broadcast({ t: 'boom', p: [x + 0.5, y + 0.5, z + 0.5], r: R });
     for (const b of lit) this.lightFuse(b[0], b[1], b[2], 0.25 + Math.random() * 0.4);
@@ -482,7 +594,7 @@ export class GameCore {
 
   onHit(c, m) {
     const mob = this.mobs.get(m.id | 0);
-    if (!mob) return;
+    if (!mob || mob.type === MOB_VILLAGER) return;
     const dx = mob.x - c.pos[0];
     const dy = mob.y - c.pos[1];
     const dz = mob.z - c.pos[2];
@@ -498,6 +610,7 @@ export class GameCore {
   }
 
   damageMob(mob, dmg, by) {
+    if (mob.type === MOB_VILLAGER) return; // жители неуязвимы
     mob.hp -= dmg;
     mob.hurt = 0.3;
     if (mob.hp > 0) return;
@@ -528,9 +641,36 @@ export class GameCore {
       wx: x,
       wy: y,
       wz: z,
+      job: 0,
+      vk: '',
+      home: null,
+      center: null,
+      idle: 0,
     };
     this.mobs.set(mob.id, mob);
     return mob;
+  }
+
+  // Заселяет деревни рядом с игроками.
+  spawnVillagers() {
+    const list = [...this.clients.values()].filter((c) => c.joined);
+    if (!list.length) return;
+    const c = list[Math.floor(Math.random() * list.length)];
+    const r = this.gen.villages.nearest(c.pos[0], c.pos[2], 1);
+    if (!r || r.dist > 60 || !r.village.houses.length) return;
+    const v = r.village;
+    let n = 0;
+    for (const mob of this.mobs.values()) if (mob.type === MOB_VILLAGER && mob.vk === v.key) n++;
+    if (n >= Math.min(v.houses.length, 6)) return;
+    const h = v.houses[n % v.houses.length];
+    let y = Math.min(HEIGHT - 4, h.y + 4);
+    while (y > 1 && !SOLID[this.getBlock(h.dx, y, h.dz)]) y--;
+    const mob = this.spawnMob(MOB_VILLAGER, h.dx + 0.5, y + 1, h.dz + 0.5);
+    mob.hp = 20;
+    mob.job = (n + Math.abs(v.x * 7 + v.z * 13)) % JOBS.length;
+    mob.vk = v.key;
+    mob.home = [h.dx + 0.5, h.dz + 0.5];
+    mob.center = [v.x, v.z];
   }
 
   trySpawn() {
@@ -589,7 +729,56 @@ export class GameCore {
         this.mobs.delete(mob.id);
         continue;
       }
-      if (mob.type === MOB_FLUFF) {
+      if (mob.type === MOB_VILLAGER) {
+        const inWater = LIQUID[this.getBlock(Math.floor(mob.x), Math.floor(mob.y + 0.4), Math.floor(mob.z))] > 0;
+        if (inWater) mob.v.y += (2.6 - mob.v.y) * Math.min(1, dt * 5);
+        else mob.v.y -= 24 * dt;
+        mob.timer -= dt;
+        if (mob.idle > 0) mob.idle -= dt;
+        let tx;
+        let tz;
+        if (night) {
+          // ночью жители расходятся по домам
+          tx = mob.home[0];
+          tz = mob.home[1];
+        } else {
+          if (mob.timer <= 0) {
+            const a = Math.random() * Math.PI * 2;
+            const r = 3 + Math.random() * 15;
+            mob.wx = mob.center[0] + Math.cos(a) * r;
+            mob.wz = mob.center[1] + Math.sin(a) * r;
+            mob.timer = 4 + Math.random() * 7;
+            mob.idle = Math.random() < 0.4 ? 2 + Math.random() * 3 : 0;
+          }
+          tx = mob.wx;
+          tz = mob.wz;
+        }
+        const dx = tx - mob.x;
+        const dz = tz - mob.z;
+        const d = Math.hypot(dx, dz);
+        // рядом с игроком житель останавливается и поворачивается к нему
+        let face = null;
+        if (nd < 3.5) {
+          for (const c of this.clients.values()) {
+            if (c.joined && Math.hypot(mob.x - c.pos[0], mob.z - c.pos[2]) < 3.5) face = c;
+          }
+        }
+        if (face) {
+          mob.v.x = 0;
+          mob.v.z = 0;
+          mob.yaw = Math.atan2(face.pos[0] - mob.x, face.pos[2] - mob.z);
+        } else if (d > 1.2 && mob.idle <= 0) {
+          mob.v.x = (dx / d) * 1.7;
+          mob.v.z = (dz / d) * 1.7;
+          mob.yaw = Math.atan2(dx, dz);
+        } else {
+          mob.v.x = 0;
+          mob.v.z = 0;
+        }
+        moveBox(this.isSolid, mob, mob.v, 0.3, 1.4, dt, res);
+        mob.onGround = res.onGround;
+        if ((res.hitX || res.hitZ) && res.onGround) mob.v.y = 7.3;
+      } else if (mob.type === MOB_FLUFF) {
         const inWater = this.getBlock(Math.floor(mob.x), Math.floor(mob.y + 0.2), Math.floor(mob.z)) === B.WATER;
         if (inWater) mob.v.y += (3 - mob.v.y) * Math.min(1, dt * 5);
         else mob.v.y -= 24 * dt;
@@ -676,10 +865,26 @@ export class GameCore {
       }
     }
 
+    this.tWater += dt;
+    if (this.tWater >= 0.2) {
+      this.tWater = 0;
+      this.stepFluid(B.WATER);
+    }
+    this.tLava += dt;
+    if (this.tLava >= 0.6) {
+      this.tLava = 0;
+      this.stepFluid(B.LAVA);
+    }
+
     this.tSpawn += dt;
     if (this.tSpawn >= 1.5) {
       this.tSpawn = 0;
       this.trySpawn();
+    }
+    this.tVillagers += dt;
+    if (this.tVillagers >= 2) {
+      this.tVillagers = 0;
+      this.spawnVillagers();
     }
     this.tickMobs(dt);
 
@@ -700,7 +905,7 @@ export class GameCore {
         const dx = mob.x - c.pos[0];
         const dz = mob.z - c.pos[2];
         if (dx * dx + dz * dz < 90 * 90) {
-          ml.push([mob.id, mob.type, r2(mob.x), r2(mob.y), r2(mob.z), r2(mob.yaw), mob.hurt > 0 ? 1 : 0]);
+          ml.push([mob.id, mob.type, r2(mob.x), r2(mob.y), r2(mob.z), r2(mob.yaw), mob.hurt > 0 ? 1 : 0, mob.job]);
         }
       }
       if (ml.length || c.hadMobs) c.send({ t: 'm', l: ml });

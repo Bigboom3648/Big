@@ -1,7 +1,7 @@
 // Локальный игрок: физика, взаимодействие с блоками, крюк, планер, здоровье.
 import * as THREE from './three.js';
 import { BUILD_LIMIT, REACH } from '../shared/constants.js';
-import { B, BLOCKS, I, ITEMS, SOLID, isBlock, breakTime, dropsFor, itemName } from '../shared/blocks.js';
+import { B, BLOCKS, I, ITEMS, SOLID, SHAPE, LIQUID, JOBS, CRATE_LOOT, isBlock, breakTime, dropsFor, itemName } from '../shared/blocks.js';
 import { moveBox, boxBlocked } from '../shared/physics.js';
 
 const HW = 0.3; // половина ширины
@@ -22,8 +22,10 @@ export class Player {
     this.dead = false;
     this.onGround = false;
     this.flying = false;
-    this.inWater = false;
-    this.headInWater = false;
+    this.inWater = false; // в любой жидкости
+    this.inLava = false;
+    this.headFluid = 0; // 0 — воздух, 1 — голова в воде, 2 — в лаве
+    this.lavaT = 0;
     this.gliding = false;
     this.hook = null;
     this.fallTop = 0;
@@ -120,8 +122,16 @@ export class Player {
     const fz = Math.floor(p.z);
     const feet = w.getBlock(fx, Math.floor(p.y + 0.1), fz);
     const body = w.getBlock(fx, Math.floor(p.y + 0.9), fz);
-    this.inWater = feet === B.WATER || body === B.WATER;
-    this.headInWater = w.getBlock(fx, Math.floor(p.y + EYE), fz) === B.WATER;
+    this.inLava = feet === B.LAVA || body === B.LAVA;
+    this.inWater = this.inLava || feet === B.WATER || body === B.WATER;
+    this.headFluid = LIQUID[w.getBlock(fx, Math.floor(p.y + EYE), fz)];
+    if (this.inLava && !this.flying) {
+      this.lavaT -= dt;
+      if (this.lavaT <= 0) {
+        this.lavaT = 0.5;
+        this.damage(4, null);
+      }
+    } else this.lavaT = 0;
 
     const sinY = Math.sin(this.yaw);
     const cosY = Math.cos(this.yaw);
@@ -160,8 +170,9 @@ export class Player {
       }
     } else if (this.inWater) {
       const k = Math.min(1, dt * 6);
-      v.x += (wx * 3.3 - v.x) * k;
-      v.z += (wz * 3.3 - v.z) * k;
+      const swim = this.inLava ? 1.7 : 3.3; // лава вязкая
+      v.x += (wx * swim - v.x) * k;
+      v.z += (wz * swim - v.z) * k;
       v.y -= 9 * dt;
       v.y *= 1 - Math.min(1, dt * 2.6);
       if (inp.jump) v.y = Math.min(3.8, v.y + 26 * dt);
@@ -287,7 +298,10 @@ export class Player {
     if (inp.attackPressed) {
       ent.hand.doSwing();
       const mob = ent.pickMob(e, d, Math.min(3.8, t ? t.dist : 99));
-      if (mob) {
+      if (mob && mob.type === 2) {
+        g.ui.toast('Жителей обижать нельзя. Правая кнопка — обмен');
+        this.attackLock = true;
+      } else if (mob) {
         const dmg = ITEMS[heldId] ? ITEMS[heldId].dmg : 1;
         g.net.send({ t: 'hit', id: mob.id, d: dmg });
         mob.hurt = true;
@@ -365,7 +379,17 @@ export class Player {
     g.net.send({ t: 'set', x: t.x, y: t.y, z: t.z, id: 0 });
     g.entities.blockBurst(t.x, t.y, t.z, t.id, 16);
     g.sound.play('break');
-    if (this.mode === 's') {
+    if (this.mode === 's' && t.id === B.CRATE) {
+      const got = [];
+      for (let k = 0; k < 2; k++) {
+        const [id, n] = CRATE_LOOT[Math.floor(Math.random() * CRATE_LOOT.length)];
+        g.inv.add(id, n);
+        got.push(`${itemName(id)} ×${n}`);
+      }
+      g.ui.toast('Из ящика: ' + got.join(', '), 3500);
+      g.sound.play('pop');
+      this.dirty = true;
+    } else if (this.mode === 's') {
       const drop = dropsFor(t.id, heldId);
       if (drop) {
         const left = g.inv.add(drop[0], drop[1]);
@@ -381,6 +405,16 @@ export class Player {
     const w = g.world;
     const inp = g.input;
     const hand = g.entities.hand;
+    const villager = g.entities.pickMob(this.eye, this.dir, Math.min(4, t ? t.dist : 99));
+    if (villager && villager.type === 2) {
+      this.trade(villager);
+      hand.doSwing();
+      return;
+    }
+    if (held && (held.id === I.BUCKET || held.id === I.BUCKET_WATER || held.id === I.BUCKET_LAVA)) {
+      this.useBucket(t, held);
+      return;
+    }
     if (t && t.id === B.BARREL && !inp.down) {
       g.net.send({ t: 'ignite', x: t.x, y: t.y, z: t.z });
       hand.doSwing();
@@ -440,6 +474,72 @@ export class Player {
     hand.doSwing();
     if (this.mode === 's') {
       g.inv.consumeSelected(1);
+      this.dirty = true;
+    }
+  }
+
+  // Обмен с жителем: у каждой профессии своя сделка.
+  trade(mob) {
+    const g = this.game;
+    const job = JOBS[mob.job] || JOBS[0];
+    const [giveId, giveN] = job.give;
+    const [getId, getN] = job.get;
+    const offer = `${giveN} × ${itemName(giveId)} → ${getN} × ${itemName(getId)}`;
+    if (g.inv.count(giveId) < giveN) {
+      g.ui.toast(`${job.name} меняет: ${offer}`, 3500);
+      return;
+    }
+    g.inv.remove(giveId, giveN);
+    const left = g.inv.add(getId, getN);
+    if (left > 0) g.inv.add(giveId, giveN); // не поместилось — возвращаем плату
+    g.ui.toast(left > 0 ? 'Рюкзак полон!' : `Обмен: ${offer}`, 2500);
+    if (left === 0) g.sound.play('craft');
+    this.dirty = true;
+  }
+
+  // Ведро: пустым зачерпываем воду или лаву, полным — выливаем.
+  useBucket(t, held) {
+    const g = this.game;
+    const w = g.world;
+    const e = this.eye;
+    const d = this.dir;
+    const hand = g.entities.hand;
+    if (held.id === I.BUCKET) {
+      const hit = w.raycast(e.x, e.y, e.z, d.x, d.y, d.z, REACH, true);
+      if (!hit || !LIQUID[hit.id]) return;
+      g.net.send({ t: 'bucket', a: 'fill', x: hit.x, y: hit.y, z: hit.z });
+      g.sound.play('splash');
+      hand.doSwing();
+      if (this.mode === 's') {
+        const full = hit.id === B.LAVA ? I.BUCKET_LAVA : I.BUCKET_WATER;
+        g.inv.consumeSelected(1);
+        if (!g.inv.selected()) {
+          g.inv.slots[g.inv.sel] = { id: full, n: 1 };
+          g.inv.changed();
+        } else if (g.inv.add(full, 1) > 0) g.ui.toast('Рюкзак полон!');
+        this.dirty = true;
+      }
+      return;
+    }
+    if (!t) return;
+    let x = t.x + t.nx;
+    let y = t.y + t.ny;
+    let z = t.z + t.nz;
+    if (SHAPE[t.id] === 1) {
+      x = t.x;
+      y = t.y;
+      z = t.z;
+    }
+    const fluid = held.id === I.BUCKET_LAVA ? B.LAVA : B.WATER;
+    const cur = w.getBlock(x, y, z);
+    if (cur !== 0 && SHAPE[cur] !== 1 && !(LIQUID[cur] && cur !== fluid)) return;
+    if (y < 1 || y > BUILD_LIMIT || !w.hasData(x, z)) return;
+    g.net.send({ t: 'bucket', a: 'pour', x, y, z, id: fluid });
+    g.sound.play('splash');
+    hand.doSwing();
+    if (this.mode === 's') {
+      g.inv.slots[g.inv.sel] = { id: I.BUCKET, n: 1 };
+      g.inv.changed();
       this.dirty = true;
     }
   }

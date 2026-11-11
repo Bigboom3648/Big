@@ -1,7 +1,7 @@
 // Ядро чанков: генерация, освещение и построение геометрии.
 // Работает в воркере (или в основном потоке, если воркеры недоступны).
 import { CHUNK, HEIGHT } from '../shared/constants.js';
-import { OPAQUE, EMIT, LOPAC, SHAPE, RENDER, CULLSAME, TILE, B } from '../shared/blocks.js';
+import { OPAQUE, EMIT, LOPAC, SHAPE, RENDER, CULLSAME, LIQUID, SKYLIT, TILE } from '../shared/blocks.js';
 import { createWorldGen } from '../shared/worldgen.js';
 
 const PAD = 16; // запас вокруг чанка для распространения света
@@ -207,7 +207,12 @@ export function createEngine(post) {
         let i = (H - 1) * SY + z * RW + x;
         for (let y = H - 1; y >= 0; y--, i -= SY) {
           const id = rb[i];
-          if (OPAQUE[id]) break;
+          if (OPAQUE[id]) {
+            // небесные острова не затеняют землю наглухо: под ними мягкая тень
+            if (!SKYLIT[id]) break;
+            if (l > 10) l = 10;
+            continue;
+          }
           l -= LOPAC[id];
           if (l <= 0) break;
           sky[i] = l;
@@ -321,9 +326,10 @@ export function createEngine(post) {
           }
           const opaque = OPAQUE[id];
           const cull = CULLSAME[id];
-          const isWater = id === B.WATER;
+          const liquid = LIQUID[id];
+          const flag = liquid === 1 ? 255 : liquid === 2 ? 128 : 0; // для анимации в шейдере
           const b = RENDER[id] === 2 ? bufT : bufO;
-          const lowTop = isWater && rb[i + SY] !== B.WATER;
+          const lowTop = liquid !== 0 && rb[i + SY] !== id;
           for (let f = 0; f < 6; f++) {
             const ni = i + NOFF[f];
             const nid = rb[ni];
@@ -381,7 +387,7 @@ export function createEngine(post) {
               b.light[li] = vs[k] * 17;
               b.light[li + 1] = Math.max(vb[k], emit) * 17;
               b.light[li + 2] = shade * AO_F[va[k]] * 255;
-              b.light[li + 3] = isWater ? 255 : 0;
+              b.light[li + 3] = flag;
               b.nv++;
             }
             if (va[0] + va[2] >= va[1] + va[3]) {

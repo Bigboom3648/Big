@@ -65,6 +65,10 @@ input {
   background: rgba(20, 70, 160, 0.38);
   opacity: 1;
 }
+#tint.lava {
+  background: rgba(255, 110, 20, 0.55);
+  opacity: 1;
+}
 #tint.hurt {
   background: radial-gradient(ellipse at center, rgba(255, 0, 0, 0) 40%, rgba(220, 20, 20, 0.55) 100%);
   opacity: 1;

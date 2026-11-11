@@ -403,6 +403,48 @@ const P = {
     t.speck(0x6d6862, 44);
     t.speck(0xaaa59e, 30);
   },
+  lava(t) {
+    t.fill(0xf7811c, 12);
+    for (let k = 0; k < 7; k++) {
+      const x = (t.r() * TS) | 0;
+      const y = (t.r() * TS) | 0;
+      for (let i = 0; i < 4; i++) t.px((x + i) % TS, (y + ((i / 2) | 0)) % TS, 0xffd23e);
+    }
+    t.speck(0xfff3a0, 10);
+    t.speck(0xc23c0e, 30);
+    t.speck(0x8f2a0a, 10);
+  },
+  basalt(t) {
+    t.fill(0x3b3d45, 5);
+    for (const x of [3, 8, 12]) for (let y = 0; y < TS; y++) if (t.r() < 0.7) t.px(x + (t.r() < 0.15 ? 1 : 0), y, 0x2a2c33);
+    t.speck(0x50535e, 22);
+    t.speck(0x24262c, 14);
+  },
+  crate_side(t) {
+    t.fill(0xb98a4e, 5);
+    for (let i = 0; i < TS; i++) {
+      t.px(i, i, 0x93693a);
+      t.px(TS - 1 - i, i, 0x93693a);
+    }
+    for (let i = 0; i < TS; i++) {
+      for (const e of [0, 1, TS - 2, TS - 1]) {
+        t.px(i, e, 0x7a5530);
+        t.px(e, i, 0x7a5530);
+      }
+    }
+    for (const [x, y] of [[1, 1], [14, 1], [1, 14], [14, 14]]) t.px(x, y, 0xd9dde4);
+  },
+  crate_top(t) {
+    t.fill(0xc0935a, 5);
+    for (let y = 4; y < TS; y += 4) for (let x = 0; x < TS; x++) t.px(x, y - 1, 0x93693a);
+    for (let i = 0; i < TS; i++) {
+      for (const e of [0, 1, TS - 2, TS - 1]) {
+        t.px(i, e, 0x7a5530);
+        t.px(e, i, 0x7a5530);
+      }
+    }
+    for (const [x, y] of [[1, 1], [14, 1], [1, 14], [14, 14]]) t.px(x, y, 0xd9dde4);
+  },
   stone_bricks(t) {
     t.fill(0x6c6f75, 3);
     for (let row = 0; row < 2; row++) {
@@ -460,7 +502,17 @@ const TOOL_SPR = {
     '....sgg.........', '...sS.gg........', '..sS...g........', '.sS.............', '................',
   ],
 };
+const BUCKET_ROWS = [
+  '................', '................', '....hhhhhhhh....', '...h........h...', '..hhhhhhhhhhhh..', '..gddddddddddg..',
+  '..gdwddddddddg..', '..gGGGGGGGGGGg..', '...gGGGGGGGGg...', '...gGGLGGGGGg...', '...gGGLGGGGGg...',
+  '....gGGGGGGg....', '....gGGGGGGg....', '....gggggggg....', '................', '................',
+];
+const BUCKET_PAL = { h: 0xd5dae3, g: 0x6f7480, G: 0xaeb4bf, L: 0xd5dae3 };
+
 const ITEM_SPR = {
+  bucket: [BUCKET_ROWS, { ...BUCKET_PAL, d: 0x3a3f4a, w: 0x3a3f4a }],
+  bucket_water: [BUCKET_ROWS, { ...BUCKET_PAL, d: 0x2f73d8, w: 0x9cc6ff }],
+  bucket_lava: [BUCKET_ROWS, { ...BUCKET_PAL, d: 0xf7811c, w: 0xffe27a }],
   stick: [
     [
       '................', '................', '............sS..', '...........sS...', '..........sS....', '.........sS.....',

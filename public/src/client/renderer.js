@@ -43,9 +43,13 @@ void main() {
   float b = 0.05 + 0.95 * pow(l, 1.5);
   vec3 tint = mix(uSkyTint, vec3(1.0, 0.85, 0.6), clamp((blk - sky) * 1.6, 0.0, 1.0));
   vec3 col = c.rgb * tint * b * vLight.z;
-  if (vLight.w > 0.5) {
+  if (vLight.w > 0.75) {
     float w = sin(vWorld.x * 1.3 + uTime * 1.6) * sin(vWorld.z * 1.1 - uTime * 1.2);
     col += 0.045 * w * b;
+  } else if (vLight.w > 0.25) {
+    // лава медленно переливается
+    float w = sin(vWorld.x * 2.1 + uTime * 0.9) * sin(vWorld.z * 1.7 - uTime * 0.7) + sin(vWorld.y * 2.3 + uTime * 1.1) * 0.5;
+    col *= 1.0 + 0.16 * w;
   }
   col = mix(col, uFogColor, smoothstep(uFogNear, uFogFar, vDist));
   gl_FragColor = vec4(col, c.a);
@@ -302,7 +306,7 @@ export class Renderer {
     this.handScene.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 2.2));
 
     this.fogDist = 100;
-    this.underwater = false;
+    this.underwater = 0; // 0 нет, 1 в воде, 2 в лаве
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -347,7 +351,11 @@ export class Renderer {
     u.uDay.value = lerp(0.36, 1, day);
     u.uSkyTint.value.setRGB(lerp(0.6, 1, day), lerp(0.7, 1, day), 1).lerp(new THREE.Color(1, 0.82, 0.68), dusk * 0.5);
     u.uTime.value = elapsed;
-    if (this.underwater) {
+    if (this.underwater === 2) {
+      u.uFogColor.value.setRGB(0.95, 0.38, 0.05);
+      u.uFogNear.value = 0.2;
+      u.uFogFar.value = 4;
+    } else if (this.underwater) {
       u.uFogColor.value.setRGB(0.06, 0.2, 0.42).multiplyScalar(lerp(0.35, 1, day));
       u.uFogNear.value = 1;
       u.uFogFar.value = 26;
